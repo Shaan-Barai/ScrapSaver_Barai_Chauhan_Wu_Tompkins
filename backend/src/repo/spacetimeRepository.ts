@@ -42,6 +42,11 @@ export interface SpacetimeConfig {
   token?: string;
   /** Per-request timeout (default 20 s). */
   timeoutMs?: number;
+  /**
+   * Whole-table read cache lifetime in ms (0 = off). Any reducer call made
+   * through this repository clears it. READ_ONLY=1 keeps tables until restart.
+   */
+  readCacheMs?: number;
 }
 
 type AlgebraicType = Record<string, any>;
@@ -96,12 +101,75 @@ function quote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/** `SELECT * | col[, col] FROM table [WHERE col = literal [AND …]] [LIMIT n]`, the only reads this repository makes. */
+interface SimpleSelect {
+  table: string;
+  columns: string[] | null;
+  where: Array<{ column: string; value: string | number | boolean }>;
+  limit?: number;
+}
+
+const SELECT_RE = /^SELECT (\*|[a-z_]+(?:, ?[a-z_]+)*) FROM ([a-z_]+)(?: WHERE (.+?))?(?: LIMIT (\d+))?$/;
+const CONDITION_RE = /([a-z_]+) = ('(?:[^']|'')*'|-?\d+(?:\.\d+)?|true|false)(?: AND |$)/y;
+
+/** Parse a read this repository issues; null for anything else (it then goes to the server as is). */
+export function parseSimpleSelect(query: string): SimpleSelect | null {
+  const m = SELECT_RE.exec(query.trim());
+  if (!m) return null;
+  const where: SimpleSelect['where'] = [];
+  if (m[3] !== undefined) {
+    CONDITION_RE.lastIndex = 0;
+    let at = 0;
+    while (at < m[3].length) {
+      CONDITION_RE.lastIndex = at;
+      const c = CONDITION_RE.exec(m[3]);
+      if (!c || c.index !== at) return null;
+      const raw = c[2]!;
+      const value = raw.startsWith("'") ? raw.slice(1, -1).replace(/''/g, "'") : raw === 'true' ? true : raw === 'false' ? false : Number(raw);
+      where.push({ column: camel(c[1]!), value });
+      at = CONDITION_RE.lastIndex;
+    }
+  }
+  return {
+    table: m[2]!,
+    columns: m[1] === '*' ? null : m[1]!.split(',').map((c) => camel(c.trim())),
+    where,
+    ...(m[4] !== undefined ? { limit: Number(m[4]) } : {}),
+  };
+}
+
+/** Index key for an equality match: strings, numbers and booleans never collide. */
+function matchKey(value: unknown): string | null {
+  if (typeof value === 'string') return `s:${value}`;
+  if (typeof value === 'number') return `n:${value}`;
+  if (typeof value === 'boolean') return `b:${value}`;
+  return null;
+}
+
+interface CachedTable {
+  loadedAt: number;
+  rows: Promise<Row[]>;
+  /** column -> value key -> rows, built on first use. */
+  indexes: Map<string, Map<string, Row[]>>;
+}
+
 export class SpacetimeRepository implements Repository {
   private readonly base: string;
   private readonly timeoutMs: number;
+  private readonly readCacheMs: number;
+  /**
+   * Whole tables, fetched once and filtered in memory. A dashboard window
+   * otherwise makes ~12 small SQL requests per plate; with this it makes one
+   * per table. Cleared by every reducer call (before and after it runs).
+   */
+  private readonly tables = new Map<string, CachedTable>();
 
-  constructor(private readonly config: SpacetimeConfig) {
+  constructor(
+    private readonly config: SpacetimeConfig,
+    private readonly now: () => number = () => Date.now(),
+  ) {
     this.timeoutMs = config.timeoutMs ?? 20_000;
+    this.readCacheMs = config.readCacheMs ?? 0;
     this.base = `${config.uri.replace(/\/$/, '')}/v1/database/${encodeURIComponent(config.module)}`;
   }
 
@@ -112,18 +180,67 @@ export class SpacetimeRepository implements Repository {
   }
 
   private async call(reducer: string, args: Record<string, string | boolean>): Promise<void> {
-    const res = await fetch(`${this.base}/call/${reducer}`, {
-      method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(args),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    if (!res.ok) {
-      throw new Error(`SpacetimeDB reducer ${reducer} failed (${res.status}): ${await res.text()}`);
+    this.tables.clear();
+    try {
+      const res = await fetch(`${this.base}/call/${reducer}`, {
+        method: 'POST',
+        headers: { ...this.headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(args),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!res.ok) {
+        throw new Error(`SpacetimeDB reducer ${reducer} failed (${res.status}): ${await res.text()}`);
+      }
+    } finally {
+      // Reads that started during the call may hold the old rows; later reads must not.
+      this.tables.clear();
     }
   }
 
+  /** A read: from the table cache when it is on and the query is a simple select, else from the server. */
   private async sql(query: string): Promise<Row[]> {
+    const parsed = this.readCacheMs > 0 ? parseSimpleSelect(query) : null;
+    if (!parsed) return this.fetchSql(query);
+    const table = this.table(parsed.table);
+    let rows = await table.rows;
+    const [first, ...rest] = parsed.where;
+    if (first) {
+      let index = table.indexes.get(first.column);
+      if (!index) {
+        index = new Map();
+        for (const row of rows) {
+          const key = matchKey(row[first.column]);
+          if (key === null) continue;
+          const list = index.get(key);
+          if (list) list.push(row);
+          else index.set(key, [row]);
+        }
+        table.indexes.set(first.column, index);
+      }
+      rows = index.get(matchKey(first.value)!) ?? [];
+    }
+    if (rest.length) rows = rows.filter((row) => rest.every((c) => row[c.column] === c.value));
+    if (parsed.limit !== undefined) rows = rows.slice(0, parsed.limit);
+    const columns = parsed.columns;
+    // Copies: callers may reshape what they get back; the cached rows stay intact.
+    return columns
+      ? rows.map((row) => Object.fromEntries(columns.map((c) => [c, structuredClone(row[c])])))
+      : structuredClone(rows);
+  }
+
+  private table(name: string): CachedTable {
+    const hit = this.tables.get(name);
+    if (hit && this.now() - hit.loadedAt < this.readCacheMs) return hit;
+    const entry: CachedTable = { loadedAt: this.now(), rows: this.fetchSql(`SELECT * FROM ${name}`), indexes: new Map() };
+    this.tables.set(name, entry);
+    // A failed load is not kept: the next read asks the server again.
+    entry.rows.catch(() => {
+      if (this.tables.get(name) === entry) this.tables.delete(name);
+    });
+    return entry;
+  }
+
+  private async fetchSql(query: string): Promise<Row[]> {
     const res = await fetch(`${this.base}/sql`, {
       method: 'POST',
       headers: this.headers(),
@@ -140,7 +257,8 @@ export class SpacetimeRepository implements Repository {
 
   /** Readiness: one tiny query proves the server, database and token work. */
   async ping(): Promise<void> {
-    await this.sql('SELECT * FROM meal_service LIMIT 1');
+    // Always asks the server: readiness must not be answered from the cache.
+    await this.fetchSql('SELECT * FROM meal_service LIMIT 1');
   }
 
   // --- menus ---

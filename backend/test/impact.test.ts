@@ -409,6 +409,15 @@ test('recommendations are saved with their inputs; regenerate asks again; Gemini
   assert.equal(stale.json.source, 'gemini');
   assert.equal(stale.json.stale, true);
   assert.equal(stale.json.text, regenerated.json.text);
+
+  // ...but never once the window holds a different number of analyzed plates: the
+  // saved text would describe other data, so the rule-based fallback for these numbers is shown.
+  s.fixtures.cap_d = { measurements: [{ itemId: HAM, remainingAreaPx: 2000 }] };
+  await capture(s, 'cap_d', `${DATE}T23:30:00.000Z`);
+  const moreData = await s.api('POST', '/api/recommendation/regenerate', { start: DATE, end: DATE });
+  assert.equal(moreData.json.source, 'fallback');
+  assert.equal(moreData.json.stale, undefined);
+  assert.notEqual(moreData.json.text, regenerated.json.text);
 });
 
 test('the recommendation trend compares pixels per plate in the two halves of the window', async (t) => {

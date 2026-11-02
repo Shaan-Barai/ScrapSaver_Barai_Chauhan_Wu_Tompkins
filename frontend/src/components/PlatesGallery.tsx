@@ -11,12 +11,15 @@
  *
  * The photo shown is the full original as the camera took it (raw) when the
  * scan has one, else the normalized photo the AI checked. Any image opens
- * larger on click. Generated sample scans (source 'demo') have no photos and
- * are left out of the gallery.
+ * larger on click. Generated sample scans (source 'demo', no AI outline) have
+ * no photos and are left out of the gallery; demo copies of real plates
+ * (source 'demo' with the real plate's photos) are shown, marked "Demo data only".
  *
- * Image links are short-lived (GET /api/captures/:id/images). A link that is
- * expired or fails to load is renewed once by asking for the images again;
- * if the fresh link fails too, the image says it is unavailable.
+ * Image links come from GET /api/captures/:id/images: short-lived presigned
+ * links, or (PHOTO_CACHE_DIR) stable resized photos from the backend, where
+ * tiles use the small `thumbUrl` copy. A link that is expired or fails to load
+ * is renewed once by asking for the images again; if the fresh link fails
+ * too, the image says it is unavailable.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCaptureImages } from '../data/api'
@@ -238,7 +241,8 @@ function PlateViewer({
             Plate at {when}
           </h3>
           <p className="text-sm">
-            {STATE_TEXT[capture.state]} · {capture.source === 'replay' ? 'Test photo' : capture.source === 'camera' ? 'Camera' : 'Uploaded photo'}
+            {STATE_TEXT[capture.state]} ·{' '}
+            {capture.source === 'demo' ? 'Demo data only' : capture.source === 'replay' ? 'Test photo' : capture.source === 'camera' ? 'Camera' : 'Uploaded photo'}
           </p>
         </div>
         <GhostButton type="button" onClick={onClose}>
@@ -341,7 +345,13 @@ function Thumbnail({ entry, onBroken }: { entry: ImageEntry | undefined; onBroke
   if (entry?.status === 'ready' && img) {
     return (
       <span className="relative block">
-        <img src={img.url} alt="" onError={() => onBroken(img.url)} className="aspect-square w-full border-b border-ink object-cover" />
+        <img
+          src={img.thumbUrl ?? img.url}
+          alt=""
+          loading="lazy"
+          onError={() => onBroken(img.url)}
+          className="aspect-square w-full border-b border-ink object-cover"
+        />
         {overlay && <span className="absolute left-2 top-2 rounded-btn bg-ink px-2 py-0.5 text-xs font-semibold text-cream">AI outline</span>}
       </span>
     )
@@ -365,8 +375,8 @@ export function PlatesGallery({
 }) {
   const { entries, ensure, renew } = useCaptureImageCache(loadImages)
   const [showAll, setShowAll] = useState(false)
-  // Sample scans have no photos; the gallery shows real (camera and test-photo) scans only.
-  const captures = allCaptures.filter((c) => c.source !== 'demo')
+  // Generated sample scans have no photos (and no AI outline); demo copies of real plates do.
+  const captures = allCaptures.filter((c) => c.source !== 'demo' || c.hasOverlay)
   const ordered = analyzedFirst(captures)
   // undefined = the user hasn't picked yet: show the newest analyzed plate.
   const [picked, setPicked] = useState<string | null | undefined>(undefined)
@@ -411,10 +421,16 @@ export function PlatesGallery({
                 <span className="block p-2">
                   <span className="block text-sm">{timeLabel(c.capturedAt)}</span>
                   <span className="block text-base font-semibold">{tileSummary(c)}</span>
-                  {c.source === 'replay' && (
+                  {c.source === 'demo' ? (
                     <span className="mt-1 block">
-                      <Badge>test photo</Badge>
+                      <Badge>Demo data only</Badge>
                     </span>
+                  ) : (
+                    c.source === 'replay' && (
+                      <span className="mt-1 block">
+                        <Badge>test photo</Badge>
+                      </span>
+                    )
                   )}
                 </span>
               </button>

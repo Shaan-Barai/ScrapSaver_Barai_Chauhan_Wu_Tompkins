@@ -11,7 +11,7 @@
 #                                       Writes /etc/scrapsaver/scrap.env the first time (or with --env).
 #   deploy/server/deploy.sh tunnel      run the Cloudflare Tunnel (scrapsaver.app) on the server too
 #   deploy/server/deploy.sh retire-mac  stop the Mac's tunnel connector, so only the server serves
-#   deploy/server/deploy.sh warm        fill the read-only cache with the dashboard's first pages (push/sync-db do this)
+#   deploy/server/deploy.sh warm        fill the caches: the dashboard's first answers and every plate photo (push/sync-db do this)
 #   deploy/server/deploy.sh status      services + health on the server and the public site
 #   deploy/server/deploy.sh logs [unit] last 100 lines of scrap-api (or scrap-spacetimedb, cloudflared)
 #
@@ -221,6 +221,14 @@ set -euo pipefail
 SHA="$1"
 rsync -a --delete --exclude node_modules/ --exclude dist/ --exclude '*.tsbuildinfo' /opt/scrapsaver/staging/ /opt/scrapsaver/app/
 chown -R scrap:scrap /opt/scrapsaver/app
+# Unit files travel with the code (e.g. the photo cache directory).
+changed=0
+for u in scrap-spacetimedb.service scrap-api.service; do
+  if ! cmp -s "/opt/scrapsaver/app/deploy/server/$u" "/etc/systemd/system/$u"; then
+    install -m 644 "/opt/scrapsaver/app/deploy/server/$u" "/etc/systemd/system/$u"; changed=1
+  fi
+done
+if [ "$changed" = 1 ]; then systemctl daemon-reload; fi
 echo "GIT_COMMIT=$SHA" > /etc/scrapsaver/release.env
 log=/var/lib/scrapsaver/build.log
 if ! sudo -u scrap -H bash -c 'set -e
@@ -284,27 +292,16 @@ cmd_retire_mac() {
 
 # ---------------------------------------------------------------- warm
 
-# The read-only backend caches GET answers until it restarts. Fill that cache in the
-# background with what the dashboard asks for first (hall-local dates), so visitors
-# never wait for the slow first computation on a small VM.
+# The read-only backend caches GET answers until it restarts, and keeps resized plate
+# photos on disk. Fill both in the background (backend/scripts/warm.mjs): every range
+# button's first answers and every plate photo, so visitors never wait on a small VM.
 cmd_warm() {
   remote <<'REMOTE'
 set -euo pipefail
 HALL="$(sed -n 's/^HALL_ID=//p' /etc/scrapsaver/scrap.env | tail -1)"
-nohup env HALL="${HALL:-hall-main}" bash -c '
-  export TZ=America/Detroit
-  today=$(date +%F); week=$(date -d "-$(( $(date +%u) - 1 )) days" +%F)
-  d30=$(date -d "-29 days" +%F); d90=$(date -d "-89 days" +%F)
-  for _ in $(seq 1 60); do curl -sf -m 2 http://127.0.0.1:8787/api/health >/dev/null && break; sleep 1; done
-  get() { curl -s -o /dev/null -m 300 "http://127.0.0.1:8787/api/$1"; }
-  get "dashboard/totals?hallId=$HALL&today=$today"
-  for start in "$today" "$week" "$d30" "$d90"; do
-    for path in dashboard/impact dashboard/impact/daily recommendation captures; do
-      get "$path?hallId=$HALL&start=$start&end=$today"
-    done
-  done
-' >/var/lib/scrapsaver/warm.log 2>&1 </dev/null &
-echo "warming the dashboard cache in the background (about 5 minutes on a small VM)"
+nohup sudo -u scrap -H node /opt/scrapsaver/app/backend/scripts/warm.mjs http://127.0.0.1:8787 "${HALL:-hall-main}" \
+  >/var/lib/scrapsaver/warm.log 2>&1 </dev/null &
+echo "warming the dashboard and photo caches in the background (log: /var/lib/scrapsaver/warm.log)"
 REMOTE
 }
 

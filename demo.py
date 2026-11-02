@@ -849,6 +849,16 @@ def step_dashboard(demo):
         demo.check("PASS" if with_kg else "WARN",
                    f"{len(with_kg)} of {len(d['days'])} day(s) have estimated CO2e"
                    + ("" if with_kg else " (calibrate the camera for kg CO2e)"))
+    # Every page opens on All time (start=all: from the first day with a plate).
+    q = urllib.parse.urlencode({"hallId": HALL_ID, "start": "all", "end": end})
+    status, d = demo.get(f"/api/dashboard/impact?{q}", timeout=60)
+    if status != 200:
+        demo.check("FAIL", f"/api/dashboard/impact?start=all HTTP {status} (restart the backend to load All time)")
+    else:
+        w, t = d["window"], d["totals"]
+        label = "  " + bold("Demo data only") if d["labels"].get("sampleData") else ""
+        demo.check("PASS", f"All time = {w['start']} to {w['end']}: {num(t['analyzedCaptures'])} plate(s) analyzed, "
+                           f"{num(d['coverage'].get('sampleCaptures') or 0)} of them demo data{label}")
     url = demo.args.dashboard_url
     parsed = urllib.parse.urlparse(url)
     if not (port_open(parsed.port or 80, parsed.hostname or "localhost")):
@@ -857,8 +867,9 @@ def step_dashboard(demo):
         else:
             demo.check("FAIL", f"Dashboard not running at {url} (cd frontend && npm run dev, or deploy/local.sh up)")
             return
-    print("  ScrapSaver → Get started → Dashboard (opens on Last 30 days; Today / Last 7 days: carbon, water, food, plates; carbon by day),")
-    print("  Statistics (Last 7 / 30 / 90 days, recommendations, foods to target, most wasted), Behind the scenes (plates).")
+    print("  ScrapSaver → Get started → Dashboard (opens on All time; Today / Last 7 / 30 days: carbon, water, food, plates; carbon by day),")
+    print("  Statistics (Last 7 / 30 / 90 days / All time, recommendations, foods to target, most wasted), Behind the scenes (plates).")
+    print("  Demo data is badged \"Demo data only\" on each page and on every demo plate.")
     if not demo.args.no_open:
         webbrowser.open(url)
     demo.check("PASS", f"Opened {url}")
@@ -965,6 +976,24 @@ def step_deploy(demo):
         code = ((body or {}).get("error") or {}).get("code") if isinstance(body, dict) else None
         demo.check("PASS" if status == 403 and code == "READ_ONLY" else "FAIL",
                    f"{url} is the read-only offsite server: a write is refused (HTTP {status} {code})")
+        # Photos: stable, resized copies served by the server and cached by browsers/Cloudflare for a year.
+        q = urllib.parse.urlencode({"hallId": HALL_ID, "start": "all", "end": demo.date, "limit": 1})
+        status, plates = demo.request("GET", f"/api/captures?{q}", base=url, timeout=60, anonymous=True)
+        if status == 200 and plates:
+            status, imgs = demo.request("GET", f"/api/captures/{plates[0]['eventId']}/images", base=url, timeout=30, anonymous=True)
+            thumb = ((imgs or {}).get("overlay") or (imgs or {}).get("original") or {}).get("thumbUrl") if status == 200 else None
+            if thumb:
+                started = time.time()
+                req = urllib.request.Request(url + thumb, headers={"user-agent": USER_AGENT})
+                try:
+                    with urllib.request.urlopen(req, timeout=60, context=ssl_context()) as r:
+                        size, cache = len(r.read()), r.headers.get("Cache-Control", "")
+                    demo.check("PASS" if "immutable" in cache else "WARN",
+                               f"Plate thumbnail {num(size / 1024, 0)} KB in {num(time.time() - started, 2)} s, Cache-Control: {cache}")
+                except Exception as e:  # noqa: BLE001
+                    demo.check("FAIL", f"{url}{thumb}: {e}")
+            else:
+                demo.check("WARN", f"{url} gives presigned photo links (PHOTO_CACHE_DIR is not set on the server)")
     if html and not demo.args.no_open and demo.args.only and "deploy" in demo.args.only:
         webbrowser.open(url + "/")
 
@@ -989,12 +1018,23 @@ def step_try_image(demo):
 
 
 def step_demo_data(demo):
-    """Dashboard demo-data controls: GET /api/demo/status (read-only; the buttons live on the dashboard)."""
+    """Demo data: copies of real plates spread over past weeks (labeled "Demo data only"), and the dashboard controls."""
     status, body = demo.get(f"/api/demo/status?hallId={HALL_ID}", timeout=10, anonymous=True)
     if status != 200 or not isinstance(body, dict):
         demo.check("FAIL", f"GET /api/demo/status: HTTP {status} (restart the backend: deploy/local.sh restart)")
         return
-    print(f"  mode={body.get('mode')}  sample captures={body.get('sampleCaptures')}  cleared at={body.get('clearedAt')}")
+    print(f"  mode={body.get('mode')}  demo plates={body.get('sampleCaptures')}  cleared at={body.get('clearedAt')}")
+    q = urllib.parse.urlencode({"hallId": HALL_ID, "start": "all", "end": demo.date, "limit": 200})
+    status, plates = demo.get(f"/api/captures?{q}", timeout=60, anonymous=True)
+    if status == 200 and isinstance(plates, list):
+        copies = [p for p in plates if p.get("source") == "demo" and p.get("hasOverlay")]
+        days = sorted({p["capturedAt"][:10] for p in copies})
+        if copies:
+            demo.check("PASS", f"{len(copies)} of the newest {len(plates)} plates are demo copies of real plates "
+                               f"({days[0]} to {days[-1]}), each badged \"Demo data only\"")
+        else:
+            demo.check("INFO", "No demo copies. Spread the real plates over 8 weeks: "
+                               "cd backend && SCRAP_INGEST_TOKEN=… npm run demo:spread  (remove: npm run demo:clear)")
     demo.check("PASS", f"Demo data mode is '{body.get('mode')}' (default = live dashboard; Load dummy data / Clear data / "
                        "Restore default switch it, and nothing real is ever deleted)")
 
@@ -1015,7 +1055,7 @@ STEPS = [
     ("admin", "Admin: choose which plates are shown", step_admin),
     ("upload_site", "Upload website: photo → results page", step_upload_site),
     ("try_image", "Try an Image (dashboard → Behind the scenes)", step_try_image),
-    ("demo_data", "Demo data controls (load / clear / restore)", step_demo_data),
+    ("demo_data", "Demo data (copies of real plates, load / clear / restore)", step_demo_data),
     ("deploy", "Production URL", step_deploy),
 ]
 NEEDS_EVENTS = {"analysis", "area", "storage", "images"}

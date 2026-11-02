@@ -4,7 +4,7 @@
  * Every function answers from src/data/mockData.ts (plus the manager's own
  * menus kept in localStorage), with the same signatures as liveApi.ts.
  */
-import { addDays, eachDay, startOfMonth, startOfWeek, todayIso } from '../lib/dates'
+import { ALL_TIME_START, addDays, eachDay, startOfMonth, startOfWeek, todayIso } from '../lib/dates'
 import { AuthRequiredError, notifyAuthRequired } from './authEvents'
 import {
   MOCK_ACTIVE_CALIBRATION_ID,
@@ -272,15 +272,20 @@ export async function getImageUrl(_objectId: string): Promise<string> {
 // Waste impact dashboard (BIG-PLAN D1-D8)
 // ---------------------------------------------------------------------------
 
+/** All time (start 'all') in demo mode: the last 366 days of mock history, like the API's chart cap. */
+function windowStart(start: IsoDate, end: IsoDate): IsoDate {
+  return start === ALL_TIME_START ? addDays(end, -365) : start
+}
+
 export async function getImpactDashboard(start: IsoDate, end: IsoDate): Promise<ImpactDashboard> {
   await wait()
-  return mockImpactDashboard(start, end, todayIso())
+  return mockImpactDashboard(windowStart(start, end), end, todayIso())
 }
 
 export async function getDailyImpact(start: IsoDate, end: IsoDate): Promise<DailyImpactPoint[]> {
   await wait()
   const today = todayIso()
-  return eachDay(start, end).map((date) => {
+  return eachDay(windowStart(start, end), end).map((date) => {
     const t = mockImpactDashboard(date, date, today).totals
     return {
       date,
@@ -296,7 +301,7 @@ export async function getDailyImpact(start: IsoDate, end: IsoDate): Promise<Dail
 export async function getCaptures(start: IsoDate, end: IsoDate): Promise<CaptureListItem[]> {
   await wait()
   const hidden = mockHidden()
-  return mockCaptures(start, end, todayIso()).filter((c) => !hidden.has(c.eventId))
+  return mockCaptures(windowStart(start, end), end, todayIso()).filter((c) => !hidden.has(c.eventId))
 }
 
 // Admin curation, demo only: hidden plate ids live in this browser.
@@ -313,7 +318,7 @@ function mockHidden(): Set<string> {
 export async function getAdminCaptures(start: IsoDate, end: IsoDate): Promise<AdminCaptureItem[]> {
   await wait()
   const hidden = mockHidden()
-  return mockCaptures(start, end, todayIso()).map((c) => ({ ...c, hidden: hidden.has(c.eventId) }))
+  return mockCaptures(windowStart(start, end), end, todayIso()).map((c) => ({ ...c, hidden: hidden.has(c.eventId) }))
 }
 
 export async function setCaptureVisibility(eventIds: string[], hidden: boolean): Promise<void> {
@@ -382,7 +387,7 @@ export async function getTryImageJob(id: string): Promise<TryImageJob> {
 
 export async function getRecommendation(start: IsoDate, end: IsoDate): Promise<Recommendation> {
   await wait()
-  return mockRecommendation(mockImpactDashboard(start, end, todayIso()), new Date())
+  return mockRecommendation(mockImpactDashboard(windowStart(start, end), end, todayIso()), new Date())
 }
 
 // ---------------------------------------------------------------------------
@@ -584,5 +589,5 @@ export async function takePhoto(): Promise<TakePhotoResult> {
 
 export async function regenerateRecommendation(start: IsoDate, end: IsoDate): Promise<Recommendation> {
   await wait()
-  return mockRecommendation(mockImpactDashboard(start, end, todayIso()), new Date())
+  return mockRecommendation(mockImpactDashboard(windowStart(start, end), end, todayIso()), new Date())
 }

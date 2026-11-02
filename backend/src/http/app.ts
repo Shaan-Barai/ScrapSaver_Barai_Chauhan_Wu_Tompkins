@@ -20,8 +20,9 @@ import type { SummaryService } from '../services/summaryService.js';
 import type { DashboardService } from '../services/dashboardService.js';
 import type { DishMatchService } from '../services/dishMatchService.js';
 import type { CameraService } from '../services/cameraService.js';
-import type { DemoService } from '../services/demoService.js';
+import { DEMO_TIME_ZONE, type DemoService } from '../services/demoService.js';
 import type { CaptureService } from '../services/captureService.js';
+import type { PhotoService } from '../services/photoService.js';
 import { parseWindow, CAPTURE_LIST_DEFAULT_LIMIT, CAPTURE_LIST_MAX_LIMIT, type ImpactService } from '../services/impactService.js';
 import type { MealLabel, MenuBundle } from '../types.js';
 import type { ReadinessService } from '../services/readinessService.js';
@@ -114,6 +115,8 @@ export interface AppDeps {
   demo?: DemoService;
   /** Public 'Try an Image' analyses (in memory only). */
   tryImage?: TryImageService;
+  /** PHOTO_CACHE_DIR: plate photos served (resized, cached) by this backend. */
+  photos?: PhotoService;
 }
 
 export function createApp(deps: AppDeps): express.Express {
@@ -585,6 +588,22 @@ export function createApp(deps: AppDeps): express.Express {
       );
     }),
   );
+  // Demo copies: the hall's real plates repeated on earlier days (labeled demo; removed with demo data).
+  app.post(
+    '/api/demo/spread',
+    wrap(async (req, res) => {
+      if (!deps.demo) throw new HttpError(503, apiError('DEMO_UNAVAILABLE', 'Sample data is not available on this server.', false));
+      const { hallId, endDate, days } = req.body ?? {};
+      res.status(201).json(
+        await deps.demo.spreadCopies({
+          hallId: typeof hallId === 'string' && hallId ? hallId : 'hall-main',
+          endDate:
+            typeof endDate === 'string' ? endDate : new Intl.DateTimeFormat('en-CA', { timeZone: DEMO_TIME_ZONE }).format(new Date(now())),
+          ...(typeof days === 'number' ? { days } : {}),
+        }),
+      );
+    }),
+  );
   app.post(
     '/api/demo/clear',
     wrap(async (_req, res) => {
@@ -708,6 +727,18 @@ export function createApp(deps: AppDeps): express.Express {
         }
       }
       res.json(await impact.captures(window, limit));
+    }),
+  );
+
+  // Plate photos kept by this server (PHOTO_CACHE_DIR): stable names, so browsers
+  // and Cloudflare keep them for a year (an object id never changes content).
+  app.get(
+    '/api/photos/:file',
+    wrap(async (req, res) => {
+      if (!deps.photos) throw notFound('ROUTE_NOT_FOUND', 'This API route does not exist.', { path: req.path });
+      const photo = await deps.photos.file(param(req, 'file'));
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.type(photo.mimeType).send(photo.bytes);
     }),
   );
 

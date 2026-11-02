@@ -192,6 +192,7 @@ cd tests && npm run test:smoke         # dashboard in Chrome (Playwright)
 
 Camera and the dashboard button: `cd capture && npm run take-photo` (settings in `.env`: CAMERA_HOST, CAMERA_USER, CAMERA_SSH_KEY).
 Sample history: `cd backend && npm run demo:seed` (DEMO_SEED=1) / `npm run demo:clear`.
+Demo copies (real plates repeated over the last 8 weeks, badged "Demo data only"): `cd backend && SCRAP_INGEST_TOKEN=… npm run demo:spread`; `npm run demo:clear` removes them too.
 
 Individual suites:
 

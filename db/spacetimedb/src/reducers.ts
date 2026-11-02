@@ -490,7 +490,10 @@ function insertCalibration(ctx: any, attemptId: string, eventId: string, a: Json
   }
   if (overlayObjectId !== undefined) {
     const overlay = ctx.db.imageObject.objectId.find(overlayObjectId);
-    if (!overlay || overlay.associationKind !== 'overlay' || overlay.associationId !== eventId) {
+    // A demo copy (capture source 'demo', spread over time from a real plate)
+    // reuses its source plate's overlay; every other capture needs its own.
+    const demoCopy = ctx.db.captureEvent.eventId.find(eventId)?.source === 'demo';
+    if (!overlay || overlay.associationKind !== 'overlay' || (overlay.associationId !== eventId && !demoCopy)) {
       throw new SenderError(`overlay ${overlayObjectId} is not a registered overlay of capture ${eventId}`);
     }
   }
@@ -770,10 +773,12 @@ export const upsert_scan_info = spacetimedb.reducer({ scanJson: t.string() }, (c
 
 // --- sample data (DEMO_SEED) -------------------------------------------------
 
-/** Tables the demo-history seed may create rows in, keyed by primary key. */
+/** Tables the demo-history seed and demo copies may create rows in, keyed by primary key. */
 const DEMO_TABLES = [
   'meal_service', 'menu_item', 'portions_served', 'capture_event', 'scan_info',
   'analysis_attempt', 'food_measurement', 'capture_count',
+  // Demo copies of real plates also carry their regions and overlay reference.
+  'segmentation_region', 'attempt_calibration',
 ] as const;
 
 export const record_demo_markers = spacetimedb.reducer({ markersJson: t.string() }, (ctx, { markersJson }) => {
@@ -794,8 +799,9 @@ export const record_demo_markers = spacetimedb.reducer({ markersJson: t.string()
 });
 
 /**
- * Remove every row the demo-history seed created (and only those), in one
- * transaction. Real scans, menus, and portions have no marker and are untouched.
+ * Remove every row the demo-history seed or demo copies created (and only
+ * those), in one transaction. Real scans, menus, and portions have no marker
+ * and are untouched; image objects are never demo rows (copies reuse them).
  */
 export const clear_demo_data = spacetimedb.reducer({}, (ctx) => {
   for (const marker of [...ctx.db.demoMarker.iter()]) {
@@ -817,6 +823,8 @@ export const clear_demo_data = spacetimedb.reducer({}, (ctx) => {
       case 'analysis_attempt': ctx.db.analysisAttempt.attemptId.delete(key); break;
       case 'food_measurement': ctx.db.foodMeasurement.measurementId.delete(key); break;
       case 'capture_count': ctx.db.captureCount.attemptId.delete(key); break;
+      case 'segmentation_region': ctx.db.segmentationRegion.regionId.delete(key); break;
+      case 'attempt_calibration': ctx.db.attemptCalibration.attemptId.delete(key); break;
       default: break;
     }
     ctx.db.demoMarker.markerId.delete(marker.markerId);

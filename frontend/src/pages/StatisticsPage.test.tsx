@@ -17,22 +17,23 @@ beforeAll(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('StatisticsPage (mock data)', () => {
-  it('opens on the last 30 days with totals, the carbon chart, recommendations and the food rankings', async () => {
+  it('opens on All time with totals, the carbon chart, recommendations and the food rankings', async () => {
     const today = todayIso()
     const totals = vi.spyOn(api, 'getImpactDashboard')
     render(<StatisticsPage />)
 
     expect(screen.getByRole('heading', { name: 'Statistics', level: 1 })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Last 90 days' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Last 7 days' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByRole('button', { name: 'Today' })).toBeNull()
 
-    // the mock calibrated the camera 20 days ago, so the last 30 days have estimates
+    // the mock calibrated the camera 20 days ago, so All time has estimates
     expect(await screen.findByLabelText(/^Carbon emissions: \d[\d,.]* (kg|g) CO2e$/)).toBeInTheDocument()
     expect(screen.queryByText('est.')).toBeNull()
     expect(screen.getByLabelText(/^Plates scanned: [\d,]+ plates$/)).toBeInTheDocument()
-    expect(totals).toHaveBeenCalledWith(addDays(today, -29), today)
+    expect(totals).toHaveBeenCalledWith('all', today)
 
     expect(screen.getByRole('heading', { name: 'Carbon emissions by day' })).toBeInTheDocument()
     const recHeading = await screen.findByRole('heading', { name: 'Recommendations' })

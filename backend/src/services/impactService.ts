@@ -78,15 +78,21 @@ export const CAPTURE_LIST_MAX_LIMIT = 200;
 /** A fallback is retried with Gemini after this long, so a provider blip does not stick. */
 const FALLBACK_RETRY_MS = 60_000;
 
+/**
+ * `start=all` ("All time"): the window starts on the first service date that
+ * has a plate (in the hall, when one is given). ImpactService resolves it.
+ */
+export const ALL_TIME = 'all';
+
 export function parseWindow(query: Record<string, unknown>): ImpactWindow {
   const { start, end, hallId } = query;
-  if (typeof start !== 'string' || !DATE.test(start) || typeof end !== 'string' || !DATE.test(end)) {
-    throw badRequest('INVALID_WINDOW', "Query parameters 'start' and 'end' are required as YYYY-MM-DD dates.", {
+  if (typeof start !== 'string' || !(DATE.test(start) || start === ALL_TIME) || typeof end !== 'string' || !DATE.test(end)) {
+    throw badRequest('INVALID_WINDOW', "Query parameters 'start' (YYYY-MM-DD or 'all') and 'end' (YYYY-MM-DD) are required.", {
       start: typeof start === 'string' ? start : null,
       end: typeof end === 'string' ? end : null,
     });
   }
-  if (start > end) throw badRequest('INVALID_WINDOW', "'start' must be on or before 'end'.", { start, end });
+  if (start !== ALL_TIME && start > end) throw badRequest('INVALID_WINDOW', "'start' must be on or before 'end'.", { start, end });
   if (hallId !== undefined && (typeof hallId !== 'string' || hallId.length === 0)) {
     throw badRequest('INVALID_PARAMETER', "'hallId' must be a non-empty string when given.");
   }
@@ -137,6 +143,22 @@ export class ImpactService {
     private readonly now: () => number = () => Date.now(),
   ) {
     this.names = new ItemNameResolver(repo);
+  }
+
+  /**
+   * `start=all` -> the first service date with a plate (hidden plates count for
+   * the admin list), or `end` when there is none. Other windows are unchanged.
+   */
+  async resolveWindow(window: ImpactWindow, opts: { includeHidden?: boolean } = {}): Promise<ImpactWindow> {
+    if (window.start !== ALL_TIME) return window;
+    const [services, captures] = await Promise.all([
+      this.repo.listServices(window.hallId),
+      this.repo.listCaptureEvents({ ...(window.hallId ? { hallId: window.hallId } : {}), includeHidden: opts.includeHidden === true }),
+    ]);
+    const withPlates = new Set(captures.map((c) => c.serviceId));
+    let first = window.end;
+    for (const s of services) if (withPlates.has(s.serviceId) && s.serviceDate < first) first = s.serviceDate;
+    return { ...window, start: first };
   }
 
   /** Records for every service whose local date falls in the window (hidden captures only for the admin list). */
@@ -203,7 +225,8 @@ export class ImpactService {
     return { physicalMethod: null, unavailableReason: mismatch ? 'incompatible_geometry' : 'no_calibration' };
   }
 
-  async dashboard(window: ImpactWindow): Promise<ImpactDashboard> {
+  async dashboard(requested: ImpactWindow): Promise<ImpactDashboard> {
+    const window = await this.resolveWindow(requested);
     return this.build(window, await this.gather(window));
   }
 
@@ -251,8 +274,8 @@ export class ImpactService {
   }
 
   /** Newest `limit` captures plus the full count (D14: callers can show truncation). */
-  async capturesPage(window: ImpactWindow, limit: number, opts: { includeHidden?: boolean } = {}): Promise<{ items: CaptureListItem[]; total: number }> {
-    const records = await this.gather(window, opts);
+  async capturesPage(requested: ImpactWindow, limit: number, opts: { includeHidden?: boolean } = {}): Promise<{ items: CaptureListItem[]; total: number }> {
+    const records = await this.gather(await this.resolveWindow(requested, opts), opts);
     const items: CaptureListItem[] = [];
     for (const r of records) {
       const names = new Map(r.items.map((i) => [i.itemId, i.displayName]));
@@ -363,7 +386,12 @@ export class ImpactService {
    * One point per local date in the window (inclusive), each built from that
    * date's records exactly like the dashboard totals; one gather for the window.
    */
-  async daily(window: ImpactWindow): Promise<DailyImpactPoint[]> {
+  async daily(requested: ImpactWindow): Promise<DailyImpactPoint[]> {
+    let window = await this.resolveWindow(requested);
+    // All time charts at most the last DAILY_IMPACT_MAX_DAYS days.
+    if (requested.start === ALL_TIME && window.start < addDays(window.end, 1 - DAILY_IMPACT_MAX_DAYS)) {
+      window = { ...window, start: addDays(window.end, 1 - DAILY_IMPACT_MAX_DAYS) };
+    }
     const days = Math.round((Date.parse(`${window.end}T12:00:00Z`) - Date.parse(`${window.start}T12:00:00Z`)) / 86_400_000) + 1;
     if (!Number.isFinite(days) || days < 1 || days > DAILY_IMPACT_MAX_DAYS) {
       throw badRequest('INVALID_WINDOW', `The window must cover 1 to ${DAILY_IMPACT_MAX_DAYS} days.`, { start: window.start, end: window.end });
@@ -403,7 +431,12 @@ export class ImpactService {
 
   /** Saved impact recommendations for a hall (insight rows), newest first. */
   async savedRecommendations(hallId: string): Promise<Recommendation[]> {
-    const out: Recommendation[] = [];
+    return (await this.savedWithPlates(hallId)).map(({ rec }) => rec);
+  }
+
+  /** Saved recommendations with the analyzed-plate count their facts described (null when unreadable). */
+  private async savedWithPlates(hallId: string): Promise<Array<{ rec: Recommendation; analyzedPlates: number | null }>> {
+    const out: Array<{ rec: Recommendation; analyzedPlates: number | null }> = [];
     // A recommendation made before "Clear data" describes data the dashboard no longer shows.
     const clearedAt = (await this.repo.getDashboardView(hallId))?.clearedAt ?? null;
     for (const i of await this.repo.listInsights(hallId)) {
@@ -411,19 +444,29 @@ export class ImpactService {
       if (clearedAt && Date.parse(i.generatedAt) < Date.parse(clearedAt)) continue;
       try {
         const body = JSON.parse(i.recommendation) as Pick<Recommendation, 'text' | 'bullets'>;
+        let analyzedPlates: number | null = null;
+        try {
+          const n = (JSON.parse(String(i.metrics.facts)) as { plates?: { analyzed?: unknown } }).plates?.analyzed;
+          analyzedPlates = typeof n === 'number' ? n : null;
+        } catch {
+          // Facts are optional context; the recommendation itself is still readable.
+        }
         out.push({
-          text: body.text,
-          bullets: body.bullets,
-          source: i.source === 'gemini' ? 'gemini' : 'fallback',
-          generatedAt: i.generatedAt,
-          inputVersion: i.dataVersion,
-          window: { start: i.windowStart, end: i.windowEnd },
+          rec: {
+            text: body.text,
+            bullets: body.bullets,
+            source: i.source === 'gemini' ? 'gemini' : 'fallback',
+            generatedAt: i.generatedAt,
+            inputVersion: i.dataVersion,
+            window: { start: i.windowStart, end: i.windowEnd },
+          },
+          analyzedPlates,
         });
       } catch {
         // An unreadable row is skipped, never shown.
       }
     }
-    return out.sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+    return out.sort((a, b) => b.rec.generatedAt.localeCompare(a.rec.generatedAt));
   }
 
   /**
@@ -432,18 +475,22 @@ export class ImpactService {
    * - A saved Gemini recommendation for the same window and inputs is reused
    *   (the same statistics never pay for a second Gemini call) unless
    *   `regenerate` is set.
-   * - If Gemini fails, the last saved Gemini recommendation is returned,
-   *   marked `stale` with its own window; with none saved, the labeled
-   *   rule-based fallback (retried after a short delay).
+   * - If Gemini fails, the last saved Gemini recommendation that described
+   *   the same number of analyzed plates is returned, marked `stale` with its
+   *   own window (2026-11-01: one written for other data, e.g. "only 2 plates",
+   *   would contradict the page). Otherwise the labeled rule-based fallback
+   *   for the current numbers (retried after a short delay).
    */
-  async recommendation(window: ImpactWindow, options: { regenerate?: boolean } = {}): Promise<Recommendation> {
+  async recommendation(requested: ImpactWindow, options: { regenerate?: boolean } = {}): Promise<Recommendation> {
+    const window = await this.resolveWindow(requested);
     const records = await this.gather(window);
     const dashboard = this.build(window, records);
     const halves = this.halves(window, records);
     const facts = recommendationFacts(dashboard, halves);
     const inputVersion = recommendationInputVersion(facts);
     const hallId = window.hallId ?? 'all';
-    const saved = await this.savedRecommendations(hallId);
+    const savedRows = await this.savedWithPlates(hallId);
+    const saved = savedRows.map(({ rec }) => rec);
     const sameWindow = (r: Recommendation) => r.window?.start === window.start && r.window?.end === window.end;
     if (!options.regenerate) {
       const reuse = saved.find((r) => r.source === 'gemini' && r.inputVersion === inputVersion && sameWindow(r));
@@ -457,7 +504,7 @@ export class ImpactService {
     if (generated.source === 'gemini' || options.regenerate) await this.store(hallId, window, generated, facts);
     if (generated.source === 'gemini') return generated;
 
-    const lastGemini = saved.find((r) => r.source === 'gemini');
+    const lastGemini = savedRows.find((r) => r.rec.source === 'gemini' && r.analyzedPlates === facts.plates.analyzed)?.rec;
     const value = hasData && lastGemini ? { ...lastGemini, stale: true } : generated;
     this.recommendations.set(`${hallId}|${inputVersion}|${window.start}|${window.end}`, { value, storedAt: this.now() });
     return value;

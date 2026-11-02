@@ -35,7 +35,7 @@ import type {
   ScanInfo,
 } from '../types.js';
 
-/** A row created by the demo-history seed: SpacetimeDB table name + primary key. */
+/** A row created by the demo-history seed or a demo copy: SpacetimeDB table name + primary key. */
 export interface DemoMarker {
   tableName:
     | 'meal_service'
@@ -45,7 +45,9 @@ export interface DemoMarker {
     | 'scan_info'
     | 'analysis_attempt'
     | 'food_measurement'
-    | 'capture_count';
+    | 'capture_count'
+    | 'segmentation_region'
+    | 'attempt_calibration';
   rowKey: string;
 }
 

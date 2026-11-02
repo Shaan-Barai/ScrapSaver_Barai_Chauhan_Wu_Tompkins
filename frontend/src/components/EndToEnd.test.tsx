@@ -82,15 +82,33 @@ function images(eventId: string, withRaw: boolean): CaptureImages {
 }
 
 describe('PlatesGallery (end-to-end additions)', () => {
+  it('shows demo copies of real plates as "Demo data only" and uses the small copy for tiles', async () => {
+    const load = vi.fn(async (id: string): Promise<CaptureImages> => {
+      const base = images(id, true)
+      return { ...base, overlay: { ...base.overlay!, thumbUrl: `https://img.test/${id}/overlay.thumb.jpg` } }
+    })
+    render(<PlatesGallery captures={[capture({ eventId: 'copy1', source: 'demo', hasOverlay: true })]} loadImages={load} />)
+    const tile = screen.getByRole('button', { name: /^Plate at / })
+    expect(tile).toHaveTextContent('Demo data only')
+    await waitFor(() => expect(tile.querySelector('img')).toHaveAttribute('src', 'https://img.test/copy1/overlay.thumb.jpg'))
+    // The opened plate shows the full-size link and says it is demo data.
+    expect(await screen.findByAltText(/leftover food the AI outlined/)).toHaveAttribute('src', 'https://img.test/copy1/overlay.jpg')
+    expect(screen.getByText(/Checked · Demo data only/)).toBeInTheDocument()
+  })
+
   it('shows the raw original next to the overlay, enlarges on click, and leaves sample scans out', async () => {
     const load = vi.fn(async (id: string) => images(id, true))
     render(
       <PlatesGallery
-        captures={[capture({ eventId: 'real' }), capture({ eventId: 'sample1', source: 'demo' }), capture({ eventId: 'sample2', source: 'demo' })]}
+        captures={[
+          capture({ eventId: 'real' }),
+          capture({ eventId: 'sample1', source: 'demo', hasOverlay: false }),
+          capture({ eventId: 'sample2', source: 'demo', hasOverlay: false }),
+        ]}
         loadImages={load}
       />,
     )
-    // only the real scan is listed; sample scans have no photos
+    // only the real scan is listed; generated sample scans have no photos
     expect(screen.getAllByRole('button', { name: /^Plate at / })).toHaveLength(1)
 
     fireEvent.click(screen.getByRole('button', { name: /^Plate at .*: 5,000 pixels$/ }))

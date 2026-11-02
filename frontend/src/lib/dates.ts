@@ -2,6 +2,9 @@
 
 export type IsoDate = string // YYYY-MM-DD
 
+/** Range start meaning "All time": the API starts on the first day with a plate. */
+export const ALL_TIME_START = 'all'
+
 export function toIso(d: Date): IsoDate {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')

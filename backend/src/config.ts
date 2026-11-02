@@ -58,8 +58,19 @@ export interface BackendConfig {
   dataFile?: string;
   /** SAM 2.1 segmentation worker (vision/sam/worker.py). */
   samWorkerUrl: string;
-  /** SpacetimeDB persistence; when unset the JSON/in-memory repository is used. */
-  spacetime?: { uri: string; module: string; token?: string };
+  /**
+   * SpacetimeDB persistence; when unset the JSON/in-memory repository is used.
+   * readCacheMs (SPACETIMEDB_READ_CACHE_MS): whole tables are read once and
+   * reused this long; every write clears them. Default 2 s, or until restart
+   * with READ_ONLY=1 (its data only changes when the database copy is replaced).
+   */
+  spacetime?: { uri: string; module: string; token?: string; readCacheMs?: number };
+  /**
+   * PHOTO_CACHE_DIR: plate photos are served from this backend (/api/photos/…)
+   * as resized copies kept on disk, with year-long browser/CDN caching, instead
+   * of short-lived presigned storage links. Unset = presigned links.
+   */
+  photoCacheDir?: string;
   attendance: { min: number; max: number; seed?: string };
   /** DEMO_SEED=1: fill ~14 days of labeled sample history at startup (idempotent). */
   demoSeed?: boolean;
@@ -119,6 +130,7 @@ export function loadSecurity(env: NodeJS.ProcessEnv = process.env): SecurityConf
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BackendConfig {
   const serveFrontend = env.SERVE_FRONTEND === '1' || env.SERVE_FRONTEND === 'true';
+  const readOnly = env.READ_ONLY === '1' || env.READ_ONLY === 'true';
   return {
     port: int('PORT', 8787, env),
     host: env.HOST || undefined,
@@ -159,14 +171,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BackendConfig 
           uri: env.SPACETIMEDB_URI,
           module: env.SPACETIMEDB_MODULE || 'scrap',
           token: env.SPACETIMEDB_TOKEN || undefined,
+          readCacheMs:
+            env.SPACETIMEDB_READ_CACHE_MS !== undefined && env.SPACETIMEDB_READ_CACHE_MS !== ''
+              ? int('SPACETIMEDB_READ_CACHE_MS', 0, env)
+              : readOnly
+                ? Number.POSITIVE_INFINITY
+                : 2000,
         }
       : undefined,
+    photoCacheDir: env.PHOTO_CACHE_DIR ? resolve(process.cwd(), env.PHOTO_CACHE_DIR) : undefined,
     attendance: {
       min: int('ATTENDANCE_MIN', 300, env),
       max: int('ATTENDANCE_MAX', 1200, env),
       seed: env.ATTENDANCE_SEED || undefined,
     },
     demoSeed: env.DEMO_SEED === '1' || env.DEMO_SEED === 'true',
-    readOnly: env.READ_ONLY === '1' || env.READ_ONLY === 'true',
+    readOnly,
   };
 }

@@ -14,6 +14,7 @@
     "build:deps": "node scripts/build-deps.mjs",
     "seed": "node scripts/seed.mjs",
     "demo:seed": "node scripts/demo.mjs seed",
+    "demo:spread": "node scripts/demo.mjs spread",
     "demo:clear": "node scripts/demo.mjs clear"
   },
   "dependencies": {
@@ -22,7 +23,8 @@
     "@scrap/analytics": "file:../analytics",
     "@scrap/vision": "file:../vision",
     "express": "^4.21.2",
-    "scrap-data": "file:../data"
+    "scrap-data": "file:../data",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

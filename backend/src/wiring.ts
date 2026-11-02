@@ -27,6 +27,7 @@ import { DishMatchService } from './services/dishMatchService.js';
 import { CameraService } from './services/cameraService.js';
 import { DemoService } from './services/demoService.js';
 import { CaptureService } from './services/captureService.js';
+import { PhotoService } from './services/photoService.js';
 import { ImpactService } from './services/impactService.js';
 import { MockAnalyzer } from './analysis/mockAnalyzer.js';
 import { MaskAnalyzer } from './analysis/maskAnalyzer.js';
@@ -125,7 +126,8 @@ export function buildBackend(options: BuildOptions = {}): AppDeps & { app: Retur
   const dashboard = new DashboardService(repo, ingestion, config, gateway.mode === 'live' ? gateway : undefined);
   // Same-dish checks for the camera bridge never run on mock text (BRIDGE.md §4.4).
   const dishMatch = new DishMatchService(gateway.mode === 'live' ? gateway : undefined);
-  const captures = new CaptureService(repo, images, ingestion);
+  const photos = config.photoCacheDir ? new PhotoService(repo, images, config.photoCacheDir, now) : undefined;
+  const captures = new CaptureService(repo, images, ingestion, photos);
   // Recommendations use live Gemini only; mock text is never shown (labeled fallback instead).
   const impact = new ImpactService(repo, ingestion, gateway.mode === 'live' ? gateway : undefined, now);
   const camera = new CameraService(`http://127.0.0.1:${config.port}`);
@@ -160,6 +162,7 @@ export function buildBackend(options: BuildOptions = {}): AppDeps & { app: Retur
     storageOrigins: storageOrigins(config),
     camera,
     demo,
+    ...(photos ? { photos } : {}),
     tryImage: new TryImageService({
       runner: options.tryImageRunner ?? createPipelineRunner({ samWorkerUrl: config.samWorkerUrl, workerToken: config.workerToken }),
       unavailableReason:

@@ -126,11 +126,12 @@ describe('normal site (not read-only)', () => {
 })
 
 describe('Behind the scenes', () => {
-  it('opens on the last 30 days, so recent plates show early in the week', async () => {
+  it('opens on All time, so every plate shows', async () => {
     const captures = vi.spyOn(api, 'getCaptures')
     open('/behind-the-scenes')
-    expect(await screen.findByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true')
     const [start, end] = captures.mock.calls[0]!
-    expect((Date.parse(end) - Date.parse(start)) / 86_400_000).toBe(29)
+    expect(start).toBe('all')
+    expect(end).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })

@@ -10,7 +10,7 @@ import { useAsync } from '../lib/useAsync'
 import { DASHBOARD_PRESETS, DateRangePicker, defaultRange, type DateRange } from '../components/DateRangePicker'
 import { PlatesGallery } from '../components/PlatesGallery'
 import { TryImage } from '../components/TryImage'
-import { EmptyState, LoadingBlock } from '../components/ui'
+import { Badge, EmptyState, LoadingBlock } from '../components/ui'
 import { useAuth } from '../state/auth'
 
 export const PLATES_PATH = '/behind-the-scenes'
@@ -26,7 +26,10 @@ function ScannedPlates() {
   const plates = useAsync(() => getCaptures(range.start, range.end), [range.start, range.end])
   return (
     <div className="space-y-5">
-      <DateRangePicker value={range} onChange={setRange} presets={DASHBOARD_PRESETS} />
+      <div className="flex flex-wrap items-center gap-3">
+        <DateRangePicker value={range} onChange={setRange} presets={DASHBOARD_PRESETS} />
+        {plates.data?.some((c) => c.source === 'demo') && <Badge>Demo data only</Badge>}
+      </div>
       {plates.status === 'loading' && !plates.data && <LoadingBlock label="Loading plates" />}
       {plates.status === 'error' && <EmptyState title="Couldn't load the plates." />}
       {plates.data && <PlatesGallery captures={plates.data} />}

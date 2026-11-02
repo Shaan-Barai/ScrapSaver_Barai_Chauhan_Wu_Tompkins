@@ -226,7 +226,7 @@ export class JsonFileRepository implements Repository {
         }
       }
       // menu_item rows go with their meal_service (menus are stored as bundles);
-      // capture_count lives on the attempt here.
+      // capture_count, segmentation_region and attempt_calibration live on the attempt here.
     }
     this.demoMarkers.clear();
     this.persist();

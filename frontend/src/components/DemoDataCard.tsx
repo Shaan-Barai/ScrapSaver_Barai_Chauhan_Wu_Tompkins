@@ -12,7 +12,7 @@ import { Card, GhostButton, PrimaryButton } from './ui'
 const SIGN_IN_PROMPT = 'Sign in as staff to change demo data'
 
 export function demoStatusText(s: DemoStatus): string {
-  if (s.mode === 'sample') return `Sample data is loaded: ${s.sampleCaptures} labeled sample scans over the last 14 days. They are not real.`
+  if (s.mode === 'sample') return `Demo data is loaded: ${s.sampleCaptures} demo plates (sample scans, or real plates copied to other days). Demo data only: they are not real scans.`
   if (s.mode === 'cleared') {
     const when = s.clearedAt ? new Date(s.clearedAt).toLocaleString() : 'an earlier time'
     return `Cleared at ${when}: the dashboard only shows scans taken after that. Nothing was deleted.`

@@ -17,6 +17,7 @@
 import { DEMO_PORTION_RANGES, WASTE_FACTOR_MENU_TEXT, factorKeyFor, portionRole } from 'scrap-data';
 import { badRequest } from '../errors.js';
 import type { DemoMarker, Repository } from '../repo/repository.js';
+import { ItemNameResolver } from './itemNames.js';
 import type {
   AnalysisAttempt,
   CaptureEvent,
@@ -26,6 +27,7 @@ import type {
   MenuBundle,
   MenuItem,
   PortionsServed,
+  ScanInfo,
 } from '../types.js';
 
 export const DEMO_TIME_ZONE = 'America/Detroit';
@@ -127,11 +129,254 @@ export function zonedToUtc(date: string, time: string, timeZone: string): Date {
   return new Date(guess);
 }
 
+export const DEMO_COPIES_VERSION = 'demo-copies-v1';
+
+export interface DemoCopyOptions {
+  hallId: string;
+  /** Last day to fill (hall local date, YYYY-MM-DD). */
+  endDate: string;
+  /** How many days back from endDate (default 56, at most 120). */
+  days?: number;
+  seed?: string;
+  timeZone?: string;
+}
+
+export interface DemoCopyResult {
+  /** Real plates the copies were made from. */
+  sourcePlates: number;
+  services: number;
+  captures: number;
+  measurements: number;
+  /** Day/meal slots skipped because a service already exists (real, sample, or earlier copies). */
+  skippedSlots: number;
+}
+
+/** Copied lunches and dinners: local start time and plates per service (weekends get fewer). */
+const COPY_MEALS: Array<{ meal: MealLabel; time: string; plates: [number, number] }> = [
+  { meal: 'lunch', time: '11:40', plates: [2, 5] },
+  { meal: 'dinner', time: '17:20', plates: [3, 7] },
+];
+
+/** One real, counted plate and everything a copy repeats. */
+interface CopySource {
+  event: CaptureEvent;
+  scan: ScanInfo | undefined;
+  attempt: AnalysisAttempt;
+  measurements: FoodMeasurement[];
+  /** Source itemId -> its menu row (for the display name and station). */
+  items: Map<string, MenuItem>;
+}
+
 export class DemoService {
   constructor(
     private readonly repo: Repository,
     private readonly now: () => number = () => Date.now(),
   ) {}
+
+  /**
+   * Demo copies (2026-11-01): spread the hall's real, counted plates over the
+   * past weeks so the dashboard has history. Each copy repeats a real plate
+   * exactly (same photo, AI outline, masks and pixel counts) on another day,
+   * with a new time. Everything is labeled demo the same way as the sample
+   * history: source 'demo', scan_info demo: true, its own `svc_demo_copy_…`
+   * services and menus, portions with source 'demo', and a demo_marker for
+   * every row, so clearing demo data removes exactly the copies. Image objects
+   * are reused, never copied, and never deleted with the copies.
+   */
+  async spreadCopies(options: DemoCopyOptions): Promise<DemoCopyResult> {
+    const days = options.days ?? 56;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(options.endDate) || !Number.isInteger(days) || days < 1 || days > 120) {
+      throw badRequest('INVALID_DEMO_COPIES', 'Demo copies need endDate (YYYY-MM-DD) and 1-120 days.');
+    }
+    const seed = options.seed ?? DEMO_COPIES_VERSION;
+    const { hallId } = options;
+    const names = new ItemNameResolver(this.repo);
+    const services = await this.repo.listServices(hallId);
+    const taken = new Set(services.map((s) => `${s.serviceDate}|${s.mealLabel}`));
+
+    // Real plates (never sample scans or earlier copies) whose count the totals use.
+    const sources: CopySource[] = [];
+    for (const event of await this.repo.listCaptureEvents({ hallId })) {
+      if (event.source === 'demo' || event.state !== 'succeeded') continue;
+      const succeeded = (await this.repo.listAnalysisAttempts(event.eventId)).filter((a) => a.status === 'succeeded');
+      succeeded.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.attemptId.localeCompare(b.attemptId));
+      const attempt = succeeded.at(-1);
+      const countStatus = attempt?.segmentation?.countStatus;
+      if (!attempt || (countStatus !== 'complete' && countStatus !== 'empty')) continue;
+      const measurements = await this.repo.listMeasurementsByAttempt(attempt.attemptId);
+      if (!measurements.every((m) => m.method === 'mask_pixel_count' && m.maskCount?.validated === true)) continue;
+      const menu = await this.repo.getMenuByService(event.serviceId);
+      const items = await names.items(menu, [
+        ...measurements.map((m) => m.itemId),
+        ...(attempt.segmentation?.regions ?? []).map((r) => r.itemId),
+      ]);
+      sources.push({ event, scan: await this.repo.getScanInfo(event.eventId), attempt, measurements, items });
+    }
+    sources.sort((a, b) => a.event.eventId.localeCompare(b.event.eventId));
+    const result: DemoCopyResult = { sourcePlates: sources.length, services: 0, captures: 0, measurements: 0, skippedSlots: 0 };
+    if (sources.length === 0) return result;
+
+    // Menu template: the latest real service's items and portions (dinner has the full menu).
+    const real = services
+      .filter((s) => !s.serviceId.startsWith('svc_demo'))
+      .sort((a, b) => b.serviceDate.localeCompare(a.serviceDate) || Number(b.mealLabel === 'dinner') - Number(a.mealLabel === 'dinner'));
+    const template = real[0] ? await this.repo.getMenuByService(real[0].serviceId) : undefined;
+    const templatePortions = template
+      ? await this.repo.listPortionsServed(template.service.serviceId, template.service.menuVersion)
+      : [];
+    const templateCount = new Map<string, number>();
+    for (const p of templatePortions) {
+      const name = template!.items.find((i) => i.itemId === p.itemId)?.displayName;
+      if (name) templateCount.set(name, p.count);
+    }
+    // Every food a copy can name: the template menu plus anything the plates measured.
+    const foods = new Map<string, { displayName: string; category?: string; description?: string }>();
+    for (const i of template?.items ?? []) foods.set(i.displayName, i);
+    for (const src of sources) for (const i of src.items.values()) if (!foods.has(i.displayName)) foods.set(i.displayName, i);
+
+    const timeZone = options.timeZone ?? template?.service.hallTimezone ?? DEMO_TIME_ZONE;
+    const nowMs = this.now();
+    for (let d = days - 1; d >= 0; d--) {
+      const date = addDays(options.endDate, -d);
+      const weekend = [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay());
+      for (const plan of COPY_MEALS) {
+        if (taken.has(`${date}|${plan.meal}`)) {
+          result.skippedSlots++;
+          continue;
+        }
+        const slot = `${hallId}_${date}_${plan.meal}`;
+        const serviceId = `svc_demo_copy_${slot}`;
+        const menuId = `menu_demo_copy_${slot}`;
+        let plates = intIn(`${seed}|plates|${slot}`, plan.plates[0], plan.plates[1]);
+        if (weekend) plates = Math.max(1, Math.round(plates * 0.6));
+        // Distinct real plates for this meal, in a seeded order.
+        const picked = sources
+          .map((src) => ({ src, r: demoRandom(`${seed}|pick|${slot}|${src.event.eventId}`) }))
+          .sort((a, b) => a.r - b.r)
+          .slice(0, Math.min(plates, sources.length))
+          .map((x) => x.src);
+        const start = zonedToUtc(date, plan.time, timeZone).getTime();
+        let at = start;
+        const times = picked.map((_, p) => (at += (p === 0 ? 0 : 4 + Math.floor(demoRandom(`${seed}|gap|${slot}|${p}`) * 9)) * 60_000));
+        const kept = picked.filter((_, p) => times[p]! <= nowMs);
+        if (kept.length === 0) continue;
+
+        const itemIdFor = (displayName: string) => `item_demo_copy_${slot}_${factorKeyFor(displayName)}`;
+        const items: MenuItem[] = [...foods.values()].map((f) => ({
+          itemId: itemIdFor(f.displayName),
+          menuId,
+          displayName: f.displayName,
+          ...(f.category ? { category: f.category } : {}),
+          ...(f.description ? { description: f.description } : {}),
+        }));
+        const bundle: MenuBundle = {
+          service: { serviceId, hallId, hallTimezone: timeZone, serviceDate: date, mealLabel: plan.meal, menuId, menuVersion: 1 },
+          items,
+        };
+        // The template's portion counts by food; foods it does not list get a seeded demo count.
+        const portions: PortionsServed[] = items.map((item) => {
+          const [min, max] = DEMO_PORTION_RANGES[portionRole(factorKeyFor(item.displayName), item.category ?? '')];
+          return {
+            recordId: JSON.stringify([serviceId, 1, item.itemId]),
+            hallId,
+            serviceId,
+            serviceDate: date,
+            menuId,
+            menuVersion: 1,
+            itemId: item.itemId,
+            count: templateCount.get(item.displayName) ?? intIn(`${seed}|portions|${serviceId}|${item.itemId}`, min, max),
+            source: 'demo',
+            updatedAt: zonedToUtc(date, '22:00', timeZone).toISOString(),
+          };
+        });
+
+        const copies = kept.map((src, p) => {
+          const n = String(p + 1).padStart(2, '0');
+          const eventId = `cap_demo_copy_${slot}_${n}`;
+          const attemptId = `att_demo_copy_${slot}_${n}`;
+          const capturedAt = new Date(times[p]!).toISOString();
+          const mapItem = (id: string | null) => (id === null ? null : itemIdFor(src.items.get(id)?.displayName ?? id));
+          const regionIds = new Map<string, string>();
+          const seg = src.attempt.segmentation;
+          const segmentation = seg
+            ? {
+                ...seg,
+                regions: seg.regions.map((r, k) => {
+                  const regionId = `rgn_demo_copy_${slot}_${n}_${k}`;
+                  regionIds.set(r.regionId, regionId);
+                  return { ...r, regionId, eventId, attemptId, itemId: mapItem(r.itemId) };
+                }),
+              }
+            : undefined;
+          const baselineVersions = Object.fromEntries(
+            Object.entries(src.attempt.baselineVersions).map(([itemId, v]) => [mapItem(itemId)!, v]),
+          );
+          const attempt: AnalysisAttempt = {
+            ...src.attempt,
+            eventId,
+            attemptId,
+            menuId,
+            menuVersion: 1,
+            baselineVersions,
+            createdAt: capturedAt,
+            ...(segmentation ? { segmentation } : {}),
+          };
+          const measurements: FoodMeasurement[] = src.measurements.map((m, k) => {
+            const { regionIds: _derived, ...rest } = m;
+            void _derived;
+            return {
+              ...rest,
+              measurementId: `msr_demo_copy_${slot}_${n}_${k}`,
+              eventId,
+              attemptId,
+              itemId: mapItem(m.itemId),
+              ...(m.maskCount ? { maskCount: { ...m.maskCount, menuId, menuVersion: 1 } } : {}),
+            };
+          });
+          const event: CaptureEvent = { ...src.event, eventId, hallId, serviceId, capturedAt, source: 'demo', state: 'succeeded' };
+          const scan: ScanInfo = {
+            eventId,
+            deviceId: 'demo-copy',
+            timestampBasis: 'demo',
+            ...(src.scan?.originalImageObjectId ? { originalImageObjectId: src.scan.originalImageObjectId } : {}),
+            ...(src.scan?.originalSha256 ? { originalSha256: src.scan.originalSha256 } : {}),
+            ...(src.scan?.sourceName ? { sourceName: src.scan.sourceName } : {}),
+            demo: true,
+          };
+          return { event, scan, attempt, measurements, regions: [...regionIds.values()] };
+        });
+
+        const markers: DemoMarker[] = [
+          { tableName: 'meal_service', rowKey: serviceId },
+          ...items.map((i) => ({ tableName: 'menu_item' as const, rowKey: i.itemId })),
+          ...portions.map((p) => ({ tableName: 'portions_served' as const, rowKey: p.recordId })),
+          ...copies.flatMap(({ event, attempt, measurements, regions }) => [
+            { tableName: 'capture_event' as const, rowKey: event.eventId },
+            { tableName: 'scan_info' as const, rowKey: event.eventId },
+            { tableName: 'analysis_attempt' as const, rowKey: attempt.attemptId },
+            { tableName: 'capture_count' as const, rowKey: attempt.attemptId },
+            { tableName: 'attempt_calibration' as const, rowKey: attempt.attemptId },
+            ...regions.map((regionId) => ({ tableName: 'segmentation_region' as const, rowKey: regionId })),
+            ...measurements.map((m) => ({ tableName: 'food_measurement' as const, rowKey: m.measurementId })),
+          ]),
+        ];
+        // Markers first, so a failure part-way leaves only removable rows.
+        await this.repo.recordDemoMarkers(markers);
+        await this.repo.upsertMenu(bundle);
+        await this.repo.replacePortionsServed(serviceId, 1, portions);
+        for (const { event, scan, attempt, measurements } of copies) {
+          await this.repo.upsertCaptureEvent(event);
+          await this.repo.upsertScanInfo(scan);
+          await this.repo.recordAnalysis(attempt, measurements);
+          result.captures++;
+          result.measurements += measurements.length;
+        }
+        result.services++;
+        taken.add(`${date}|${plan.meal}`);
+      }
+    }
+    return result;
+  }
 
   async seedHistory(options: DemoSeedOptions): Promise<DemoSeedResult> {
     const days = options.days ?? 14;

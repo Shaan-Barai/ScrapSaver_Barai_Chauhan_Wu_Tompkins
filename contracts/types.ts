@@ -548,6 +548,11 @@ export interface CaptureListItem {
 export interface SignedImage {
   objectId: string;
   url: string;
+  /**
+   * A small copy for thumbnails (≤ 480 px), when the server keeps photos
+   * itself (PHOTO_CACHE_DIR, 2026-11-01). Absent with presigned links.
+   */
+  thumbUrl?: string;
   expiresAt: string;
 }
 

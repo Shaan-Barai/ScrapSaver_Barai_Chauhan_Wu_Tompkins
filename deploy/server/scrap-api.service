@@ -12,6 +12,9 @@ WorkingDirectory=/opt/scrapsaver/app
 EnvironmentFile=/etc/scrapsaver/scrap.env
 # GIT_COMMIT of the shipped release (written by deploy.sh push).
 EnvironmentFile=-/etc/scrapsaver/release.env
+# Plate photos, resized and kept on disk (PHOTO_CACHE_DIR); writable despite ProtectSystem=strict.
+CacheDirectory=scrapsaver-photos
+Environment=PHOTO_CACHE_DIR=/var/cache/scrapsaver-photos
 ExecStart=/usr/bin/node backend/dist/backend/src/server.js
 Restart=always
 RestartSec=3

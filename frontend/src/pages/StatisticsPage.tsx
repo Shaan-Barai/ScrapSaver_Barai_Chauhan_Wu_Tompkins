@@ -33,7 +33,7 @@ export function StatisticsPage({ dataRevision = 0 }: { dataRevision?: number }) 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="font-display text-3xl font-bold tracking-tight text-ink">Statistics</h1>
-          {impact.data?.labels.sampleData && <Badge>Sample data</Badge>}
+          {impact.data?.labels.sampleData && <Badge>Demo data only</Badge>}
         </div>
         <DateRangePicker value={range} onChange={setRange} presets={STATISTICS_PRESETS} />
       </div>

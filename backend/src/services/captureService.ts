@@ -1,7 +1,8 @@
 /**
  * Plate gallery read models (BIG-PLAN D7, contracts CaptureImages):
  * short-lived read URLs for a capture's original photo, its segmented
- * overlay, and its per-food masks. URLs come from the storage adapter's
+ * overlay, and its per-food masks (or, with PHOTO_CACHE_DIR, stable
+ * /api/photos links served and cached by this backend). URLs come from the storage adapter's
  * read access, appear only in responses, and are never logged or stored.
  */
 
@@ -10,6 +11,7 @@ import { ItemNameResolver } from './itemNames.js';
 import type { Repository } from '../repo/repository.js';
 import type { ImageService } from './imageService.js';
 import type { IngestionService } from './ingestionService.js';
+import type { PhotoService } from './photoService.js';
 import type { AnalysisAttempt, CaptureImages, FoodMeasurement, SignedImage } from '../types.js';
 
 
@@ -20,6 +22,8 @@ export class CaptureService {
     private readonly repo: Repository,
     private readonly images: ImageService,
     private readonly ingestion: IngestionService,
+    /** PHOTO_CACHE_DIR: stable, cacheable photo links served by this backend instead of presigned ones. */
+    private readonly photos?: PhotoService,
   ) {
     this.names = new ItemNameResolver(repo);
   }
@@ -73,6 +77,7 @@ export class CaptureService {
 
   /** Temporary read access, or null when the object is missing/unfinalized. Storage outages propagate. */
   private async sign(objectId: string): Promise<SignedImage | null> {
+    if (this.photos) return this.photos.link(objectId);
     try {
       const access = await this.images.getReadAccess(objectId);
       return { objectId, url: access.url, expiresAt: access.expiresAt };

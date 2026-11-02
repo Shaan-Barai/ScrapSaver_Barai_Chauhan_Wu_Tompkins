@@ -23,7 +23,7 @@ describe('DemoDataCard', () => {
 
     vi.mocked(api.getDemoStatus).mockResolvedValue(st({ mode: 'sample', sampleLoaded: true, sampleCaptures: 42 }))
     const r2 = render(<DemoDataCard />)
-    expect(await screen.findByText(/42 labeled sample scans over the last 14 days. They are not real./)).toBeInTheDocument()
+    expect(await screen.findByText(/42 demo plates .*Demo data only: they are not real scans\./)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Restore default' })).toBeInTheDocument()
     r2.unmount()
 
@@ -38,7 +38,7 @@ describe('DemoDataCard', () => {
     render(<DemoDataCard onDataChanged={onDataChanged} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Load dummy data' }))
     await waitFor(() => expect(onDataChanged).toHaveBeenCalledTimes(1))
-    expect(await screen.findByText(/Sample data is loaded/)).toBeInTheDocument()
+    expect(await screen.findByText(/Demo data is loaded/)).toBeInTheDocument()
   })
 
   it('Clear asks for confirmation first', async () => {

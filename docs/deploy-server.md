@@ -77,11 +77,20 @@ SCRAP_PROD_URL=https://scrapsaver.app python3 demo.py --only deploy
 node deploy/smoke.mjs https://scrapsaver.app                # 0 failed; writes → 403 READ_ONLY
 ```
 
-**Speed on a small VM.** The read-only backend keeps every successful GET answer in memory
-until it restarts. Answers holding presigned R2 photo links are kept for 2 minutes, because those
-links last 10. `push` and `sync-db` then run `warm`, which fetches the dashboard's first pages
-in the background. On a free e2-micro, the first computation of a dashboard window takes 10–20
-seconds, and cached answers are instant. Logs of the warm-up are in `/var/lib/scrapsaver/warm.log`.
+**Speed on a small VM.** Three caches, all filled again after a restart (2026-11-01):
+
+- **Database.** Each SpacetimeDB table is read once and kept in memory until the backend restarts
+  (`sync-db` restarts it), so a dashboard window is computed in memory instead of ~12 SQL requests
+  per plate.
+- **Answers.** Every successful GET answer is kept in memory until restart.
+- **Photos.** The unit sets `PHOTO_CACHE_DIR=/var/cache/scrapsaver-photos` (systemd
+  `CacheDirectory`). Plate photos are served by the backend under stable names as resized copies
+  (≤480 px tiles, ≤1600 px plate view; PNG masks as stored), kept on disk across restarts and
+  marked `immutable` for a year, so browsers and Cloudflare keep them too.
+
+`push` and `sync-db` then run `warm` (`backend/scripts/warm.mjs`), which in the background fetches
+every range button's first answers (All time, Today, Last 7 / 30 / 90 days) and every plate photo.
+Its log is `/var/lib/scrapsaver/warm.log`. `push` also installs changed unit files.
 
 **Current server (2026-10-06):** Google Cloud e2-micro (free tier), `us-central1-a`, Ubuntu 24.04,
 `SCRAP_SERVER=mike@34.59.116.242`, SSH key `~/.ssh/scrap_server`. The external IP is

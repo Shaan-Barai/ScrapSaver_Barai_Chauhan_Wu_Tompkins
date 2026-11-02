@@ -88,20 +88,21 @@ Pixels wasted stay the stored measurement (shown on Behind the scenes); the
 dashboard leads with estimated carbon emissions. Grams, kg CO2e and litres
 of water come from calibrated plates only and show "—" when unavailable
 (never 0). They are not marked "est." in the UI (product owner, 2026-10-04).
-Every page (Admin too) opens on the last 30 days (2026-10-06).
+Every page (Admin too) opens on **All time** (2026-11-01; `start=all`, from the first day with a plate).
+Demo data (sample scans and copies of real plates) is badged **Demo data only**.
 
-- **Dashboard** (Today / Last 7 days / Last 30 days): cards for Carbon emissions, Water, Food
+- **Dashboard** (Today / Last 7 days / Last 30 days / All time): cards for Carbon emissions, Water, Food
   wasted (estimates) and Plates scanned; **Carbon emissions by day** chart
   (`GET /api/dashboard/impact/daily`; "Today" charts the last 7 days). No
   camera button: take photos with `npm run take-photo` in backend/.
-- **Statistics** (Last 7 / 30 / 90 days): the same cards and chart,
+- **Statistics** (Last 7 / 30 / 90 days / All time): the same cards and chart,
   **Recommendations** (AI or rule-based fallback badge, each bullet with its
   supporting number, Ask again), **Foods to target** (pixels per portion,
   impact points per portion, portions served, "Demo portions" badge), **Most
   wasted foods** (per portion / total pixels / impact points). Nutrition lost
   was removed from the UI (2026-10-04); the API still returns nutrition points.
-- **Behind the scenes** (Today / Last 7 days / Last 30 days): the plates
-  gallery. Opening a plate shows the photo and AI outlines side by side with
+- **Behind the scenes** (Today / Last 7 days / Last 30 days / All time): the plates
+  gallery; tiles use the small `thumbUrl` copy when the server keeps photos (PHOTO_CACHE_DIR). Opening a plate shows the photo and AI outlines side by side with
   a per-food Pixels wasted table; expired links are renewed once.
 
 ## Deferred / out of scope here

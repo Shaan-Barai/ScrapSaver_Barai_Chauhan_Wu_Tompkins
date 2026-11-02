@@ -309,6 +309,8 @@ export interface CaptureListItem {
 export interface SignedImage {
   objectId: string
   url: string
+  /** Small copy for tiles, when the server keeps photos itself (PHOTO_CACHE_DIR). */
+  thumbUrl?: string
   expiresAt: string
 }
 

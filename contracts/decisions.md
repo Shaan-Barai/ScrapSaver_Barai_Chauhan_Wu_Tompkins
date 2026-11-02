@@ -605,3 +605,44 @@ Dashboard, Statistics, Behind the scenes and Admin all open on **Last 30 days**,
 **Last 7 days** (a rolling 7 days, replacing the calendar "This week", which was empty on Mondays).
 Dashboard and Behind the scenes keep **Today**; Statistics and Admin keep **Last 90 days**. Frontend
 only (`frontend/src/components/DateRangePicker.tsx`); no API change.
+
+## 2026-11-01 — All time by default, demo copies, cached photos (user request)
+
+- **All time.** Every page (Dashboard, Statistics, Behind the scenes, Admin) opens on **All time**,
+  and each range picker offers it. The frontend sends `start=all`; the backend
+  (`ImpactService.resolveWindow`) starts the window on the first service date that has a plate (in
+  the hall), or on `end` when there is none. The daily chart caps All time at the last 366 days.
+- **Demo copies.** The public site looked empty (21 real plates, all on Oct 3–4). `npm run
+  demo:spread` (`POST /api/demo/spread`, `DemoService.spreadCopies`) repeats the hall's real,
+  counted plates on lunches and dinners over the last 56 days, 2–7 plates a meal (fewer on
+  weekends), never in the future, and never in a meal that already has a menu (real ones stay
+  untouched). A copy repeats its source exactly: photo, raw original, AI outline, masks, pixel
+  counts and calibrated estimates, with a new time. They are labeled like the sample history:
+  capture source `demo`, scan_info `demo: true`, their own `svc_demo_copy_…` services and menus,
+  portions with source `demo` (the latest real menu's counts), and a demo_marker per row, so
+  `npm run demo:clear` and the Settings buttons remove exactly the copies. Image objects are reused,
+  never copied or deleted. Schema (reducers only, published in place): a capture with source `demo`
+  may reference another capture's overlay, and `segmentation_region` / `attempt_calibration` rows
+  are demo tables.
+- **"Demo data only".** The badge on Dashboard and Statistics (formerly "Sample data") and on
+  Behind the scenes, on every demo plate tile and in the opened plate's subtitle. The gallery now
+  shows demo plates that have photos; generated sample scans (no photo) stay out.
+- **Photos cached.** With `PHOTO_CACHE_DIR` (set by the offsite server's unit), photo links are
+  stable `/api/photos/<objectId>.{thumb,display,full}.{jpg,png}`: ≤480 px tiles (~25 KB instead
+  of a 240 KB outline image), ≤1600 px plate view (~150 KB instead of the 3.5 MB camera original),
+  PNG masks as stored. The backend reads each object once (same finalized-object check as
+  presigned links), resizes with sharp, keeps it on disk, and answers `Cache-Control: public,
+  max-age=31536000, immutable`, so browsers and Cloudflare keep them. `SignedImage.thumbUrl` is
+  additive. Without `PHOTO_CACHE_DIR`, presigned links as before.
+- **Data cached.** `SpacetimeRepository` reads whole tables once and filters in memory (it only
+  issues `SELECT * | col FROM t [WHERE col = literal AND …] [LIMIT n]`). Every reducer call clears
+  it; entries live 2 s on the Mac and until restart with `READ_ONLY=1`
+  (`SPACETIMEDB_READ_CACHE_MS`). An All-time dashboard went from 3.8 s (21 plates) to 0.4 s (424).
+  Readiness pings always ask the server. `deploy.sh warm` (`backend/scripts/warm.mjs`) fills the
+  GET cache for every range button and every plate photo after `push` and `sync-db`.
+- **Saved AI recommendations.** When Gemini is unavailable, a saved Gemini recommendation is shown
+  (labeled saved earlier) only if it described the same number of analyzed plates as the window;
+  otherwise the labeled rule-based fallback for the current numbers. The old saved text said "Only
+  2 plates were analyzed" next to 424 plates. Gemini answered `GEMINI_BILLING` on 2026-11-01, so no
+  new AI text could be generated.
+

@@ -23,14 +23,15 @@ const WATER = /^Water: (\d[\d,.]* L|not available)$/
 const FOOD = /^Food wasted: (\d[\d,.]* (kg|g)|not available)$/
 
 describe('DashboardPage (mock data)', () => {
-  it('opens on the last 30 days with the four headline cards and the carbon chart; no pixels, plates or recommendation', async () => {
+  it('opens on All time with the four headline cards and the carbon chart; no pixels, plates or recommendation', async () => {
     const daily = vi.spyOn(api, 'getDailyImpact')
     const totals = vi.spyOn(api, 'getImpactDashboard')
     const today = todayIso()
     const { container } = render(<DashboardPage />)
 
     expect(screen.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Last 7 days' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Today' })).toHaveAttribute('aria-pressed', 'false')
 
@@ -38,10 +39,10 @@ describe('DashboardPage (mock data)', () => {
     expect(screen.getByLabelText(WATER)).toBeInTheDocument()
     expect(screen.getByLabelText(FOOD)).toBeInTheDocument()
     expect(screen.getByLabelText(/^Plates scanned: [\d,]+ plates$/)).toBeInTheDocument()
-    expect(totals).toHaveBeenCalledWith(addDays(today, -29), today)
+    expect(totals).toHaveBeenCalledWith('all', today)
 
     expect(await screen.findByRole('heading', { name: 'Carbon emissions by day' })).toBeInTheDocument()
-    expect(daily).toHaveBeenLastCalledWith(addDays(today, -29), today)
+    expect(daily).toHaveBeenLastCalledWith('all', today)
 
     expect(screen.queryByRole('heading', { name: 'Plates' })).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Recommendations' })).toBeNull()
