@@ -15,7 +15,7 @@ browser ──https──▶ Cloudflare ──tunnel──▶ cloudflared (serve
 - **Read-only means it.** With `READ_ONLY=1`, every non-GET `/api` request answers `403 READ_ONLY`,
   even with the ingest token. So do `/api/try-image/*` and `/api/camera/*`. No admin sign-in exists.
   Gemini stays off even if a key is present. The dashboard hides upload, edit, "Ask again", Try an
-  Image and admin controls, and shows "Read-only view" at the top.
+  Image and admin controls, and shows "This site shows demo data only" at the top.
 - **Data comes from the Mac.** `sync-db` copies the Mac's SpacetimeDB data folder and its signing keys,
   so the existing `SPACETIMEDB_TOKEN` keeps working. New plates captured on the Mac reach the site only
   when you run `sync-db` again.

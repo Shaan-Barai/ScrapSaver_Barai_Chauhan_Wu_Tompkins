@@ -5,7 +5,7 @@ import App from './App'
 import * as api from './data/api'
 import { AUTH_REQUIRED_EVENT } from './data/authEvents'
 
-const NOTICE = 'Read-only view: this site shows recorded data. Uploads and edits are turned off.'
+const NOTICE = 'This site shows demo data only'
 
 beforeAll(() => {
   vi.stubGlobal(

@@ -114,7 +114,7 @@ function Shell() {
       <main id="main" className="min-w-0 flex-1 overflow-y-auto bg-cream p-4 sm:p-6">
         {readOnly && (
           <p role="note" className="mb-5 rounded-card border border-linen bg-cream px-4 py-2 text-sm text-ink">
-            Read-only view: this site shows recorded data. Uploads and edits are turned off.
+            This site shows demo data only
           </p>
         )}
         {page === 'dashboard' && <DashboardPage dataRevision={dataRevision} />}
