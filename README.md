@@ -303,7 +303,7 @@ Live checks against Supabase, detection scoring, and the camera test are describ
 | Pilot plan | [docs/pilot-runbook.md](docs/pilot-runbook.md) |
 | Known limitations | [docs/known-limitations.md](docs/known-limitations.md) |
 | Impact formula and food factors | [factors/README.md](factors/README.md) |
-| Development log | [docs/PROGRESS.md](docs/PROGRESS.md), run reports `RUN3_REPORT.md`–`RUN6_REPORT.md` |
+| Development log | [docs/PROGRESS.md](docs/PROGRESS.md) |
 
 ## Credits
 
