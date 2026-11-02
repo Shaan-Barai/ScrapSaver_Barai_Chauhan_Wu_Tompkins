@@ -1,37 +1,125 @@
-# ScrapSaver: dining hall food-waste tracker (MHacks prototype)
+# ScrapSaver: measuring and forecasting dining hall food waste
 
-ScrapSaver helps dining hall managers see what food comes back uneaten. The agreed
-analysis flow is **Gemini food classification → segmentation mask → pixel
-counting in code**. The primary metric is **Pixels wasted**: foreground pixels
-in validated masks of visible leftover food. A beginner-friendly dashboard
-shows totals, trends, the most-wasted items, and AI-powered suggestions.
+A research prototype from MHacks by **Barai, Chauhan, Wu and Tompkins**, built around the University of Michigan's dining halls (M-Dining). It measures the food left on returned plates from photos, and tests whether better prep forecasts could cut that waste.
 
-**Waste metrics (BIG-PLAN v2, 2026-10-04):** everything is in **pixels**:
-total Pixels wasted, **waste per portion** (pixels ÷ portions served, the
-ranking for foods to target) and most wasted. **Relative impact points** weight
-pixels by each food's typical density and its greenhouse-gas (C) and freshwater
-(W) footprint: `points = pixels/1000 × weight_g_per_cm2 × (0.19·C + 1.50·W)`
-([factors/README.md](factors/README.md)). They are
-unitless and only compare foods with each other. They are not kg, litres or dollars. Nutrition
-points are reported separately and are not in the score. Each photo counts only
-the dish being scanned: food on neighboring plates is left out (target-dish
-counting). Portion counts are currently **demo** numbers. The dashboard shows
-total waste, relative impact, foods to target, most wasted, nutrition points,
-a plate gallery with the original and segmented (AI outline) images, and a
-grounded AI recommendation.
+**Status:** detection runs on real plate photos (numbers below). The weight estimate has been tested on a public dataset of full plates. Every forecasting result so far is **simulated**; the real-data pilot is next.
 
-**End-to-end path:** Uno Q camera → laptop inbox → bridge (one capture per
-dish) → R2 upload → SpacetimeDB records → Gemini classify + boxes → SAM 2.1
-masks → counted pixels on the target dish, overlay JPEG (stored in R2) →
-dashboard. See [BIG-PLAN.md](docs/plans/BIG-PLAN.md), [BRIDGE.md](docs/BRIDGE.md), and
-[EXPLAIN.md](docs/EXPLAIN.md) for a plain-language tour of the database.
+## The problem
 
-**Portions served:** enter actual per-food counts under **Portions served**,
-or upload a CSV for a selected meal. Counts persist by service and menu
-version; re-imports replace counts. See [the portion-count guide](docs/portions-served.md).
+A dining hall decides before each meal how much of each dish to prepare:
+- prepare too little, and the dish runs out mid-meal;
+- prepare too much, and the extra is thrown away, wasting its cost and its environmental footprint.
 
-Attendance is **simulated**. Pixels are counted from AI masks of visible
-leftovers; they are not a weight. Impact points are relative estimates.
+The hall plans with the forecast in its food-service software (FSS). What diners take and then leave on their plates isn't recorded per dish. Without that record, there's no number to plan against and no way to tell whether a change in prep reduced waste.
+
+## Approach
+
+**1. Measure plate waste from photos.**
+
+```text
+plate photo → Gemini (which menu foods, and where) → SAM 2.1 (a mask per food) → pixels counted in code
+            → grams (camera calibration × each food's grams per cm²) → estimated kg CO2e and litres of water
+```
+
+- **Menu-first classification:** Gemini only chooses among that meal's menu items, and marks the plate being scanned so food on neighbouring plates isn't counted.
+- **Masks and pixels:** SAM 2.1 (`sam2.1-hiera-small`) draws a mask from each Gemini box. **Pixels wasted** is counted from the validated masks, in code. It is the stored measurement.
+- **Labeled estimates:** grams, CO2e and water are always labeled estimates, derived from pixels at read time. They are empty (never zero) when no calibration exists.
+
+**2. Forecast how much to prepare.** For each dish and meal:
+
+```text
+prepped = eaten + tray waste + pan leftover
+```
+
+- **Inputs:**
+  - Prepped and pan leftover come from the kitchen's production sheets, read by an AI model and confirmed by a person.
+  - Tray waste comes from the plate photos.
+- **Forecast and prep amount:** models forecast demand, treating meals that ran out as "at least this much". A newsvendor rule then sets the prep amount from the cost of running out vs. the cost of waste, where the waste cost includes an environmental price.
+- **Shadow mode:** for a pilot, the hall keeps cooking from FSS exactly as today. ScrapSaver writes and locks its forecast before each meal, and is scored against FSS and the actual numbers afterwards.
+
+Methods: [docs/forecasting-methods.md](docs/forecasting-methods.md). Pilot plan: [docs/pilot-runbook.md](docs/pilot-runbook.md).
+
+## Results so far
+
+Each number below is copied from the linked page, which says exactly what was measured.
+
+### Detection: which menu foods are on the plate [REAL photos]
+
+- **Recall 94.4%, precision 94.4%:** 17 correct, 1 missed, 1 wrong.
+  - Measured 2026-10-29 on **12 real plate photos with 18 hand-labeled foods**, all from **one dinner at one dining hall**.
+  - Scored against that dinner's 23-food menu. `gemini-3.8-flash`, fixed seed, temperature 0.
+- **Against a 26-food menu** (3 extra foods): recall 94.4%, precision 81.0%, identical in 3 repeated runs.
+- **The miss was a timeout,** since fixed. The fix's expected effect (no misses) is a **projection, not yet measured.**
+- **Not scored:** mask quality (pixel areas vs. hand-drawn masks).
+
+Details: [docs/detection-accuracy.md](docs/detection-accuracy.md).
+
+### Time per plate [REAL photos]
+
+- **Average 34.7 s, median 38.4 s per plate** (range 14.9–50.0 s), on 11 of the same 12 photos.
+- The 12th timed out (3 × 90 s); that is the timeout the fix above addresses.
+- Almost all of the time is the two Gemini passes, which run at the same time. SAM takes about 0.5 s.
+
+Details: [docs/detection-accuracy.md → Timing](docs/detection-accuracy.md#timing-and-the-pass-2-timeout-run-5-2026-10-29).
+
+### Weight: grams from area [Nutrition5k full plates, not leftovers]
+
+Tested on 31 public Nutrition5k plates, each weighed on a scale. The factors were fitted on 27 other plates:
+
+| Grams estimated from | Mean absolute error | Mean absolute % error |
+|---|---|---|
+| area × our current per-food factors | 35.8 g | 45% |
+| area × factors measured on Nutrition5k | 20.4 g | 33% |
+| depth (volume) × measured density | 24.7 g | 38% |
+
+- **Masks:** this test used stand-in masks (colour + depth boxes → SAM), because the Gemini API was unavailable at the time.
+- **Foods:** single-food plates of 7 food types, 2–5 test plates per food.
+- **What it shows:** our current factors are the weak point. Per food they were off by −56% to +53%, and +161% on the two greens plates. Depth didn't beat area overall.
+
+Details and limits: [docs/weight-accuracy.md](docs/weight-accuracy.md).
+
+### Forecasting [SIMULATED]
+
+**All forecasting results so far are simulated:** a made-up hall over 6 weeks, 15 dishes, 291 dish-meals.
+- Five models land at 18.3–22.3% WAPE.
+- These numbers show that the pipeline runs end to end. **They are not evidence about any real dining hall or about FSS.**
+- **Next:** a 6-week shadow pilot on M-Dining's real swipe counts, FSS export and production sheets.
+
+Details: [docs/forecasting-methods.md §8](docs/forecasting-methods.md#8-results-so-far).
+
+## Limitations and what's next
+
+- **Small, single-meal detection test.** 12 photos from one dinner. Masks are not yet scored against hand-drawn masks.
+- **Weight is checked on full lab plates, not leftovers,** and not with our camera. Our hall camera hasn't been calibrated yet. The per-food factors need replacing with measured ones.
+- **No real forecasting data yet.** The comparison "FSS" is a simulated stand-in until a real export is imported.
+- **Next:**
+  1. Measure the timeout fix end to end.
+  2. Score the masks.
+  3. Re-run the weight test with the real Gemini → SAM pipeline.
+  4. Calibrate the hall camera.
+  5. Run the shadow pilot.
+
+## Credits
+
+- **Team:** Barai, Chauhan, Wu, Tompkins.
+- **Nutrition5k:** Thames et al., CVPR 2021, Google Research. [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Source: https://github.com/google-research-datasets/Nutrition5k.
+- **SAM 2.1** (Segment Anything Model 2), Meta AI. Code and checkpoints under Apache 2.0. Source: https://github.com/facebookresearch/sam2.
+- **Gemini API**, Google. Used under the [Google APIs Terms of Service and the Gemini API Additional Terms](https://ai.google.dev/gemini-api/terms).
+- **Open-Meteo** weather data, [CC BY 4.0](https://open-meteo.com/en/terms) (forecast context features).
+
+---
+
+## For developers
+
+The sections below describe the running system: the dashboard, the demo and setup.
+
+**What the dashboard shows:**
+- **Pixels wasted:** foreground pixels in validated masks of visible leftover food. This is the primary measurement.
+- **Waste per portion:** pixels ÷ portions served, used to rank foods to target.
+- **Relative impact points:** `pixels/1000 × weight_g_per_cm2 × (0.19·C + 1.50·W)` ([factors/README.md](factors/README.md)). They are unitless, compare foods only with each other, and are not kg, litres or dollars.
+- **Labels:** attendance and portion counts in the demo are labeled **simulated** / **demo**.
+- **Portions served:** enter real per-food counts in the dashboard or upload a CSV ([the portion-count guide](docs/portions-served.md)).
+- **Data path:** camera → laptop inbox → bridge (one capture per dish) → Supabase Storage + Postgres → Gemini + SAM 2.1 → counted pixels and an overlay image → dashboard ([BRIDGE.md](docs/BRIDGE.md)).
 
 ## Calibrated area, CO2e and water (IT_4)
 
