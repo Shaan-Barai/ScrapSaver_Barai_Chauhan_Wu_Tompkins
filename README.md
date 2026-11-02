@@ -1,225 +1,318 @@
-# ScrapSaver: dining hall food-waste tracker (MHacks prototype)
+# ScrapSaver
 
-ScrapSaver helps dining hall managers see what food comes back uneaten. The agreed
-analysis flow is **Gemini food classification → segmentation mask → pixel
-counting in code**. The primary metric is **Pixels wasted**: foreground pixels
-in validated masks of visible leftover food. A beginner-friendly dashboard
-shows totals, trends, the most-wasted items, and AI-powered suggestions.
+**Measuring and forecasting dining hall food waste at the University of Michigan.**
 
-**Waste metrics (BIG-PLAN v2, 2026-10-04):** everything is in **pixels**:
-total Pixels wasted, **waste per portion** (pixels ÷ portions served, the
-ranking for foods to target) and most wasted. **Relative impact points** weight
-pixels by each food's typical density and its greenhouse-gas (C) and freshwater
-(W) footprint: `points = pixels/1000 × weight_g_per_cm2 × (0.19·C + 1.50·W)`
-([factors/README.md](factors/README.md)). They are
-unitless and only compare foods with each other. They are not kg, litres or dollars. Nutrition
-points are reported separately and are not in the score. Each photo counts only
-the dish being scanned: food on neighboring plates is left out (target-dish
-counting). Portion counts are currently **demo** numbers. The dashboard shows
-total waste, relative impact, foods to target, most wasted, nutrition points,
-a plate gallery with the original and segmented (AI outline) images, and a
-grounded AI recommendation.
+ScrapSaver measures the food students leave on their plates from a single overhead photo, and uses that measurement to test whether a dining hall could prepare closer to what diners actually eat. It is built around Michigan Dining (M-Dining) by **Shaan Barai, Angad Chauhan, Michael Wu and River Tompkins**, and is an ongoing research prototype.
 
-**End-to-end path:** Uno Q camera → laptop inbox → bridge (one capture per
-dish) → R2 upload → SpacetimeDB records → Gemini classify + boxes → SAM 2.1
-masks → counted pixels on the target dish, overlay JPEG (stored in R2) →
-dashboard. See [BIG-PLAN.md](docs/plans/BIG-PLAN.md), [BRIDGE.md](docs/BRIDGE.md), and
-[EXPLAIN.md](docs/EXPLAIN.md) for a plain-language tour of the database.
+> **Status (November 2026)**
+> - **Plate-waste detection** runs on real dining hall photos. [Measured results below](#results).
+> - **Weight estimation** has been tested against a scale on a public dataset (full plates, not leftovers).
+> - **Forecasting** runs end to end, but **every forecasting number so far is simulated**. A shadow pilot on real M-Dining data is next.
 
-**Portions served:** enter actual per-food counts under **Portions served**,
-or upload a CSV for a selected meal. Counts persist by service and menu
-version; re-imports replace counts. See [the portion-count guide](docs/portions-served.md).
+Every result in this README says whether it comes from **real photos**, a **public dataset** or **simulated data**, and links to the page that says exactly what was measured.
 
-Attendance is **simulated**. Pixels are counted from AI masks of visible
-leftovers; they are not a weight. Impact points are relative estimates.
+---
 
-## Calibrated area, CO2e and water (IT_4)
+## Contents
 
-With an active **camera calibration**, each food also gets an **estimated**
-area (cm²) and grams, plus kg CO2e and litres of water. These are shown next to
-the food's label on the plate image and on the dashboard.
+- [The problem](#the-problem)
+- [How it works](#how-it-works)
+- [Results](#results)
+- [Research design choices](#research-design-choices)
+- [Limitations](#limitations)
+- [Roadmap](#roadmap)
+- [Repository layout](#repository-layout)
+- [Getting started](#getting-started)
+- [Testing](#testing)
+- [Documentation](#documentation)
+- [Credits](#credits)
 
-1. Lay a credit card (46.21 cm²) or any flat object of measured area where the
-   plates go, with the camera locked in place.
-2. Run `npm run calibrate -- --known-area-cm2 46.21` in `capture/`, or use
-   Settings → Camera calibration.
-3. Grams = area × the food's `weight_g_per_cm2`; kg CO2e and litres of water
-   follow from grams. See [docs/calibration.md](docs/calibration.md) and
-   [IT_4.md](docs/plans/IT_4.md).
+---
 
-Pixels wasted stays the primary measurement. Without a calibration, the
-physical numbers are blank, never zero.
+## The problem
 
-**Run the whole stack locally in production mode:**
-`deploy/local.sh up | status | smoke | down` ([docs/deploy.md](docs/deploy.md)).
-**Public site without the Mac:** scrapsaver.app runs **read-only** on an offsite Linux server
-(`READ_ONLY=1`: recorded data only, no uploads, edits, Gemini or SAM):
-`deploy/server/deploy.sh setup | sync-db | push | tunnel | status` ([docs/deploy-server.md](docs/deploy-server.md)).
+Before every meal, a dining hall decides how much of each dish to cook:
+- **Too little,** and the dish runs out halfway through service.
+- **Too much,** and the extra is thrown away, along with its cost and environmental footprint.
 
-## Demo
+At a large Michigan dining hall, that decision is made for roughly 1,000–1,400 diners per meal. It's planned with forecasts from the hall's food-service software (FSS), on a six-week menu cycle. In interviews, dining hall staff described a measurement gap:
 
-One command runs and narrates the whole product: the Uno Q takes a photo, sends it to the laptop,
-the bridge puts it in R2 and SpacetimeDB, Gemini + SAM 2.1 segment it, and the demo prints the
-pixels, where every object is stored, total waste, waste per portion, most wasted, relative impact,
-the AI recommendation, saves a "photo | AI segmentation" picture per plate, and opens the dashboard.
+- **What happens in the kitchen is recorded by hand.** Each station writes down how much was prepared, how much was left in the pan, and when a dish ran out. A manager collects the sheets the next morning.
+- **What happens on the plate isn't recorded at all.** Compost bins aren't weighed per dish, and diners often take a full plate and throw away the sides.
+- **Demand swings** with weather, football games, exams, holidays and trends, and kitchens are often short-staffed.
 
-```bash
-python3 demo.py                  # real camera (arduino@35.1.88.76), press Enter per plate
-python3 demo.py --simulate       # no board: test2/ photos through the same path (labeled replay)
-python3 demo.py --plates 3 --yes # three plates, no pauses
-python3 demo.py --list           # the steps; --only/--skip pick some, --events cap_… re-shows captures
-python3 demo.py --simulate --hall hall-test   # run on a test hall instead of hall-main
+Without a per-dish record of what comes back on plates, there's no number to plan against, and no way to tell whether a change in prep actually reduced waste.
+
+## How it works
+
+ScrapSaver has two halves: it **measures** waste bottom-up from plates, and it **forecasts** prep top-down from kitchen records.
+
+```mermaid
+flowchart LR
+    subgraph Measure["1. Measure plate waste"]
+        A[Plate photo] --> B["Gemini<br/>which menu foods, and where"]
+        B --> C["SAM 2.1<br/>a mask per food"]
+        C --> D[Pixels counted in code]
+        D --> E["Estimated grams,<br/>kg CO2e, litres of water"]
+    end
+    subgraph Forecast["2. Forecast prep"]
+        F["Production sheets<br/>(read by AI, confirmed by staff)"] --> H[Forecast models]
+        G["Swipes, calendar,<br/>games, weather"] --> H
+        E --> H
+        H --> I["Prep amount per dish,<br/>locked before service"]
+    end
 ```
 
-**Upload website:** `node upload_demo/server.mjs` → http://localhost:8795. One "Upload a photo"
-button; after the upload, a results page shows the original, Gemini's classification, SAM 2.1's masks,
-the final result and the total food wasted (matched against every food in the food database;
-[`upload_demo/README.md`](upload_demo/README.md)).
-[`demo_pictures/`](demo_pictures/README.md) shows every step for the halal chicken + rice bowl.
+### 1. Measuring plate waste
 
-It needs the stack from [Setup](#setup) (it offers to start missing services) and writes its
-photos and logs to `images/demo-runs/` (gitignored). **Adding a feature? Add a demo step**
-(AGENTS.md §3 rule 13).
+1. **Classify against the menu.** Gemini (`gemini-3.8-flash`) looks at the plate photo and chooses only among *that meal's* menu items. It returns a box around each piece of food and marks which plate is being scanned, so food on neighbouring trays isn't counted. Two passes run at the same time, and their boxes are merged.
+2. **Segment.** SAM 2.1 (`sam2.1-hiera-small`) turns each box into a pixel-precise mask. Where masks overlap, the smallest box wins, and tiny fragments under 1% are dropped.
+3. **Count.** Pixels of leftover food are counted per dish, in code. **Pixels wasted is the stored measurement**; everything after it is a labeled estimate.
+4. **Estimate impact.** With a camera calibration, pixels become cm², and cm² become grams through each food's grams-per-cm² factor. Grams then become estimated kg CO2e and litres of water. The dashboard ranks foods with a Waste Impact Score that prices these at $0.19 per kg CO2e and $1.50 per m³ of water ([factors/README.md](factors/README.md)).
 
-## Documents
+### 2. Forecasting how much to prepare
 
-- [`IT_4.md`](docs/plans/IT_4.md) — calibrated area, estimated CO2e/water, local production stack (plan + tracker; Depth Anything V2 was tried and removed).
-- [`docs/deploy-server.md`](docs/deploy-server.md) — **read-only public site on an offsite server** (the Mac can be off); `sync-db` copies new data up.
-- [`docs/deploy.md`](docs/deploy.md) — **deploy the website**: local production stack (`deploy/local.sh`) + Cloudflare Tunnel + custom domain, step by step.
-- [`BIG-PLAN.md`](docs/plans/BIG-PLAN.md) — the camera → impact → dashboard plan and its tracker.
-- [`EXPLAIN.md`](docs/EXPLAIN.md) — the whole database (SpacetimeDB + R2) in plain language.
-- [`factors/README.md`](factors/README.md) — the waste
-  impact formula and per-food factors (nutrition in `factors/menu_nutrition_factors_EastQuad.csv`).
-- [`AGENTS.md`](AGENTS.md) — the working plan: agent roles, ownership, rules,
-  measurement formulas, and completion checks.
-- [`UI.md`](docs/plans/UI.md) — dashboard spec (layout, palette, copy).
-- [`MVP_AI.md`](docs/plans/MVP_AI.md) — researched Meta SAM segmentation plan and
-  bounding-box model options; implementation and food-image evaluation are pending.
-- [`AI.md`](docs/plans/AI.md) — current AI flow. The DepthAnythingV2 volume idea was
-  tried in IT_4 and removed (see `contracts/decisions.md`).
-- [`contracts/`](contracts/) — shared entity types, error format, sample
-  records, and [recorded decisions](contracts/decisions.md).
+For each dish at each meal:
+
+```text
+prepped = eaten + tray waste + pan leftover
+```
+
+- **Inputs:**
+  - **Prepped and pan leftover** come from the kitchen's handwritten production sheets. Gemini reads a photo of the sheet into draft rows, and a staff member confirms each one.
+  - **Tray waste** comes from the plate photos.
+  - **Demand context:** meal swipes, the academic calendar, home football games, religious holidays and day-ahead weather forecasts.
+- **Models.** Five forecasters sit behind one interface: the baseline, seasonal naive, a 4-week moving average, exponential smoothing and gradient boosting. Optional unsupervised helpers (day-type clustering, an anomaly flag on sheet entries) are off by default.
+- **From forecast to prep amount.** Each dish gets a prep amount that balances the cost of running out against the cost of waste. The waste cost includes the environmental price above, so high-impact dishes get a slightly smaller buffer.
+- **Shadow mode.** During a pilot, the hall keeps cooking from FSS exactly as it does today. ScrapSaver writes its forecast before each meal, and the database locks it once service starts. Afterwards it's scored against FSS and against what actually happened.
+
+Full method: [docs/forecasting-methods.md](docs/forecasting-methods.md).
+
+---
+
+## Results
+
+### Detection: which menu foods are on the plate (real photos)
+
+12 real plate photos from one dinner at one dining hall, with 18 foods hand-labeled by the team. Each detected food is compared with the label: **recall** = share of the foods on the plate that were found; **precision** = share of reported foods that are really there.
+
+| Menu offered to Gemini | Runs | Correct | Missed | Wrong | Recall | Precision |
+|---|---|---|---|---|---|---|
+| **That dinner's 23-food menu** | 1 | 17 | 1 | 1 | **94.4%** | **94.4%** |
+| A 26-food test menu (3 extra foods) | 3, identical | 17 | 1 | 4 | 94.4% | 81.0% |
+
+- **Settings:** fixed seed, temperature 0.
+- **The single miss was a timeout.** Gemini "thought" for about 28,700 tokens on one photo and never answered. A fix (retry with thinking capped at 1,024 tokens) found the missing food in a single test request. Its effect on the full 12-photo run is **projected, not yet measured.**
+- **The one "wrong" detection** (rice on IMG_2703) also appeared in an earlier experiment and may be a gap in the hand label. It's being checked.
+- **Why the menu matters:** offering foods that weren't served that night causes confusions (Cheese Bread for Pepperoni Pizza, for example). In production, each photo is classified against its own meal's menu.
+- **Not yet scored:** how accurate the masks' outlines are.
+
+Details: [docs/detection-accuracy.md](docs/detection-accuracy.md).
+
+### Speed (real photos)
+
+| Seconds per plate | Average | Median | Fastest | Slowest |
+|---|---|---|---|---|
+| Gemini pass 1 | 21.7 | 18.8 | 8.3 | 63.1 |
+| Gemini pass 2 | 33.3 | 37.7 | 11.3 | 49.0 |
+| SAM 2.1 | 0.5 | 0.5 | 0.3 | 0.7 |
+| **Total** | **34.7** | **38.4** | **14.9** | **50.0** |
+
+- Measured on 11 of the 12 photos; the 12th is the timeout above.
+- The two Gemini passes run in parallel, so the total is about the slower pass.
+- Time grows with how long Gemini thinks, not with the number of foods.
+
+### Weight: grams from area (public dataset)
+
+To check whether area-based weight estimates hold up, we used **Nutrition5k** (Google, CVPR 2021): overhead photos of cafeteria plates from a known camera height, with every ingredient weighed on a scale.
+- **Test set:** 31 single-food plates covering 7 food types.
+- **Measured factors:** fitted on 27 other plates.
+
+| Grams estimated from | Mean abs. error | Mean abs. % error | Bias (avg. over/under) | Without leafy greens: error / % error |
+|---|---|---|---|---|
+| Area × our original per-food factors | 35.8 g | 45% | −1.6 g | 35.9 g / 37% |
+| **Area × factors measured on Nutrition5k** | **20.4 g** | **33%** | +5.4 g | **18.9 g / 22%** |
+| Depth (volume) × measured density | 24.7 g | 38% | +0.9 g | 22.6 g / 26% |
+
+What this shows:
+- **The original per-food factors are the weak point.** Per food they were off by −56% to +53%. Their near-zero overall bias comes from errors cancelling out, not from accuracy.
+- **Measured factors roughly halve the error.**
+- **Depth didn't beat area overall.** It only did better on cauliflower, so the pipeline stays area-based for now.
+- **Leafy greens failed every method,** but only 2 test plates were greens.
+
+Caveats:
+- These are **full plates, not leftovers.**
+- They weren't taken with our camera.
+- The masks were a stand-in (colour + depth boxes → SAM), because the Gemini API was unavailable during this test.
+- 12 of 70 sampled plates, mostly bowls, were excluded for clearly wrong masks before any error was computed.
+- There is an unresolved 1.76× disagreement between two published pixel-scale figures for this camera. It affects the original-factor row, not the measured ones.
+
+Details and limits: [docs/weight-accuracy.md](docs/weight-accuracy.md).
+
+### Forecasting (simulated)
+
+All forecasting results so far come from a **made-up hall**: 6 weeks, lunch and dinner, 15 dishes, 291 dish-meals. On it, the five models land between 18.3% and 22.3% WAPE.
+
+These numbers show that the method runs end to end, with walk-forward evaluation and matched-stockout comparisons. **They are not evidence about any real dining hall or about FSS.** The "FSS" in the simulation was built to over-prepare, so beating it means nothing.
+
+Details: [docs/forecasting-methods.md §8](docs/forecasting-methods.md#8-results-so-far).
+
+---
+
+## Research design choices
+
+Decisions made so the results can be trusted, not just demoed:
+
+- **Pixels are the stored measurement.** Grams, CO2e and water are always labeled estimates, computed at read time. They're blank, never zero, without a calibration, so a weak assumption can't silently become data.
+- **Menu-first classification.** Gemini picks only from the meal's menu, which is how a dining hall actually works. The test above shows why it matters.
+- **Deterministic evaluation.** Fixed seed and temperature 0, with repeated runs, separate real model changes from noise.
+- **Censored demand.** When a dish runs out, observed demand is only a lower bound. Those meals are treated as "at least this much," never as the true demand.
+- **No look-ahead.** Backtests are walk-forward. A test fails if any feature uses future data, including the *observed* weather on the day being predicted: models only see the forecast available the day before.
+- **Fair comparison.** Models are compared with FSS at the **same number of stockouts**, so a model can't "win" just by cooking less and running out more.
+- **Locked shadow forecasts.** Once service starts, the database rejects any change to that meal's forecast.
+- **Simulated data is labeled everywhere:** in the database (`is_simulated`), the UI, the API and the docs.
+- **Privacy.** Production-sheet reviewer names are private, readable only by the server, and never shown in the dashboard. Photos show plates, not people.
+
+## Limitations
+
+- **Detection test:** 12 photos from one dinner, labeled by the team, scored in one run. Mask outlines aren't yet scored against hand-drawn masks.
+- **Weight:** checked on full lab plates, not leftovers, and not with our camera. The dining hall camera hasn't been calibrated yet, and bowls are untested.
+- **Forecasting:** there's no real M-Dining data yet. Production sheets, an FSS export and swipe counts have been requested ([docs/data-intake.md](docs/data-intake.md)).
+- **Model dependence:** detection depends on a hosted model (Gemini). Results are pinned to `gemini-3.8-flash` and may change with model updates.
+
+## Roadmap
+
+1. Measure the timeout fix on all 12 photos, and test capping Gemini's thinking on every request (speed and cost per plate).
+2. Re-run the weight test with the real Gemini → SAM pipeline, including multi-food plates and bowls.
+3. Calibrate the dining hall camera ([docs/camera-calibration-checklist.md](docs/camera-calibration-checklist.md)), then weigh real leftovers to measure leftover-specific error.
+4. Score mask outlines against hand-drawn masks.
+5. Run a 6-week shadow pilot at one dining hall ([docs/pilot-runbook.md](docs/pilot-runbook.md)): ScrapSaver's locked forecasts vs. FSS vs. actuals, at matched stockouts.
+
+---
 
 ## Repository layout
 
-| Directory | Owner | Contents |
-| --- | --- | --- |
-| `contracts/` | Agent 1 | Shared types, samples, decisions |
-| `data/`, `db/` | Agent 2 | Menu parsing/validation, SpacetimeDB schema, seeds |
-| `capture/` | Agent 3 | Camera/replay capture adapter |
-| `vision/` | Agent 4 | Gemini classification, segmentation, mask pixel counting |
-| `backend/` | Agent 5 | API, object-storage adapter, orchestration |
-| `analytics/` | Agent 6 | Aggregates, simulated attendance, suggestions |
-| `frontend/` | Agent 7 | ScrapSaver dashboard (React + Tailwind) |
-| `docs/`, `tests/` | Agent 8 | Demo docs, fixtures, integration/e2e tests |
-| `factors/` | Agents 2+6 | Per-food waste/nutrition factor CSVs (East Quad, Halal Bros, 500 common foods), menu labels, and the formula README; `data/` generates its tables from them |
-| `docs/plans/` | Agent 1 | Planning/spec docs and trackers (BIG-PLAN, IT_4, DEBUG-PLAN, UI, AI, MVP_AI) |
-| `deploy/` | — | Local production stack, smoke test, Cloudflare Tunnel; `deploy/server/` for the read-only offsite server |
-| `experiments/` | — | One-off segmentation/menu experiment outputs and `test_sam.py` (not used at runtime) |
-| `test2/`, `demo_pictures/`, `upload_demo/` | — | Demo plate photos, pipeline pictures, upload demo site (used by `demo.py`) |
-| `archive/preview-app/` | — | Earlier standalone preview app, superseded by `frontend/` + `backend/` (not used at runtime) |
+| Directory | Contents |
+|---|---|
+| `vision/` | Gemini classification, SAM 2.1 segmentation worker (`vision/sam/`), mask pixel counting, production-sheet reader |
+| `backend/` | API, Supabase repository and storage adapters, ingestion and orchestration |
+| `frontend/` | Dashboard (React + Tailwind): waste, statistics, production sheets, forecast |
+| `analytics/` | Aggregates, calibration and plate-scale estimates, impact formulas |
+| `forecast/` | Python forecasting: models, walk-forward backtests, worker, prep sheets, importers for M-Dining data, shadow report, simulated dataset |
+| `capture/` | Camera adapter (Arduino UNO Q + Logitech C920s over SSH) and replay tools |
+| `supabase/` | Postgres schema, row-level security and storage bucket, as migrations |
+| `factors/` | Per-food waste, impact and nutrition factor tables, plus the impact formula |
+| `data/`, `db/` | Menu parsing and validation; the legacy SpacetimeDB schema |
+| `contracts/` | Shared types, error format, sample records and [recorded decisions](contracts/decisions.md) |
+| `tests/` | Integration, live, system, detection-scoring and weight-accuracy tests |
+| `docs/` | Methods, results, runbooks and plans |
+| `deploy/` | Local production stack and the read-only public server |
+| `test2/`, `demo_pictures/`, `upload_demo/` | Test plate photos, pipeline walkthrough images, upload demo |
+| `archive/`, `experiments/` | Superseded prototypes and one-off experiments (not used at runtime) |
 
-Root files: `demo.py` (one-command demo) and `test-all.sh` (every test).
-`images/` holds local, gitignored photos and demo-run logs.
+Root: `demo.py` (narrated end-to-end demo) and `test-all.sh` (every test).
 
-## Setup
+## Getting started
 
-Prerequisites: Node.js 20.12+ and the SpacetimeDB CLI 2.10.x
-(`curl -sSf https://install.spacetimedb.com | sh`).
+**Requirements:** Node.js 20.12+, Python 3.11+ with a virtualenv for SAM 2.1 (see [vision/sam/README.md](vision/sam/README.md)), a Supabase project, and a Gemini API key.
+
+**1. Environment.** Copy `.env.example` to `.env` at the repo root and fill it in. **Never commit `.env`.**
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `SUPABASE_URL` | backend, workers, dashboard build | The API address, `https://<project-ref>.supabase.co` |
+| `SUPABASE_ANON_KEY` | dashboard build | Publishable key; row-level security limits it to dashboard tables |
+| `SUPABASE_SERVICE_ROLE_KEY` | backend, workers, scripts | Secret key, **server only**. The dashboard build refuses it. |
+| `SUPABASE_DB_URL` | migrations | Session pooler connection string |
+| `DATABASE_PROVIDER=supabase` | backend | |
+| `OBJECT_STORAGE_PROVIDER=supabase`, `OBJECT_STORAGE_CONTAINER=scrap-images` | backend | Private bucket with signed URLs |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | backend, vision | Live classification and sheet reading |
+
+**2. Run it.**
 
 ```bash
-# 1. Secrets (server-side only; .env is gitignored — never commit it)
-cp .env.example .env            # then set GEMINI_API_KEY and the R2_* bucket credentials
+set -a; . ./.env; set +a
 
-# 2. Local SpacetimeDB (keep running in its own terminal)
-spacetime start
+# Database schema, row-level security and storage bucket (review the dry run first)
+npx supabase db push --db-url "$SUPABASE_DB_URL" --dry-run
+npx supabase db push --db-url "$SUPABASE_DB_URL"
 
-# 3. One-time: a local identity that owns the database, saved to .env
-echo "SPACETIMEDB_TOKEN=$(curl -s -X POST http://127.0.0.1:3000/v1/identity | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')" >> .env
-spacetime login --token "$(grep ^SPACETIMEDB_TOKEN= .env | cut -d= -f2)"
-cd db/spacetimedb && npm ci && spacetime publish --module-path . --server local --yes scrap && cd ../..
-#    (additive schema changes publish in place; never use --delete-data on scrap)
+# SAM 2.1 worker (http://127.0.0.1:8790)
+.venv/bin/python vision/sam/worker.py
 
-# 4. SAM 2.1 segmentation worker (Python venv with Meta's sam2; see vision/sam/README.md)
-.venv/bin/python vision/sam/worker.py      # own terminal; http://127.0.0.1:8790
+# Backend API (http://localhost:8787)
+cd backend && npm ci && npm start
 
-# 5. Backend API (builds data/vision/analytics first) — http://localhost:8787
-cd backend && npm ci && SPACETIMEDB_MODULE=scrap npm start   # own terminal
-
-# 6. Demo data: seed menus (incl. the 26-food dinner) + demo portions served
-cd backend && SPACETIMEDB_MODULE=scrap npm run seed -- --live-dinner   # adds today's 26-food dinner
-
-# 7a. Real camera: Uno Q → laptop inbox, then the bridge (docs/BRIDGE.md, docs/ARDUINO.md)
-python3 capture/uno-q/laptop_capture.py --target arduino@YOUR_BOARD_IP --auto
-cd capture && npm ci && npm run ingest-inbox -- --service svc_hall-main_2026-10-03_dinner --watch
-# 7b. No board: simulate the camera with the test2/ photos (one dish per photo)
-cd capture && npm run simulate-camera -- --service svc_hall-main_2026-10-03_dinner
-
-# 8. Dashboard — http://localhost:5173 (proxies /api to the backend)
+# Dashboard (http://localhost:5173)
 cd frontend && npm ci && npm run dev
 ```
 
-Images are stored in a private **Cloudflare R2** bucket: create the bucket and
-an R2 API token with Object Read & Write on it, then fill in
-`OBJECT_STORAGE_CONTAINER` and `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` /
-`R2_SECRET_ACCESS_KEY`. Set `OBJECT_STORAGE_PROVIDER=local-dev` to run without
-a Cloudflare account (files under `backend/.local-storage/`).
-
-Always pass `--server local` to `spacetime` commands: the CLI's default
-server is the hosted maincloud. Without `GEMINI_API_KEY` the backend uses a
-deterministic mock analyzer; without `SPACETIMEDB_URI` it uses an in-memory
-store. `VITE_USE_MOCK=1 npm run dev` runs the dashboard on demo data alone.
-
-## Verify
-
-**One command runs everything** (see [docs/runbook.md](docs/runbook.md)):
+**3. Forecasting.**
 
 ```bash
-./test-all.sh            # offline: every package, dashboard build, db typecheck, integration, Python, scripts
-./test-all.sh --live     # + starts the local stack: smoke test, live E2E suites, demo.py --simulate (test halls only)
-./test-all.sh --list     # suites; --only a,b / --skip a,b / --install / --fail-fast
+python3 -m forecast.worker run --hall hall-main --start 2026-10-25 --end 2026-10-31   # write forecasts
+python3 -m forecast.backtest --hall hall-main --start 2026-09-26 --end 2026-10-23    # walk-forward model comparison
+python3 -m forecast.shadow_report --hall hall-main --start 2026-11-02 --end 2026-11-08  # locked forecasts vs. FSS vs. actuals
+python3 -m forecast.prep_sheet --hall hall-main --date 2026-10-25                     # printable prep sheets
 ```
 
-Or one command per test level (details: [docs/testing.md](docs/testing.md)):
+Until real data arrives, `python3 -m forecast.simulate generate --hall hall-main` creates the labeled simulated dataset. `python3 -m forecast.simulate remove --hall hall-main` deletes only simulated rows. Importers for real swipe counts, FSS exports and production-sheet photos are in `forecast/importers/` ([docs/data-intake.md](docs/data-intake.md)).
+
+**4. Camera calibration** (turns pixels into cm²): place a card of known area where the plates go, with the camera locked, then run `npm run calibrate -- --known-area-cm2 46.21` in `capture/`. See [docs/calibration.md](docs/calibration.md) and the [step-by-step checklist](docs/camera-calibration-checklist.md).
+
+The forecast scheduler (a GitHub Actions workflow that writes forecasts before each meal) is included but **off**; see [docs/scheduler-setup.md](docs/scheduler-setup.md).
+
+<details>
+<summary><b>Demo and legacy stack (SpacetimeDB + Cloudflare R2)</b></summary>
+
+The project began on SpacetimeDB (records) and Cloudflare R2 (images) and has moved to Supabase. The legacy stack is kept until its removal is approved; see [docs/supabase-migration-plan.md](docs/supabase-migration-plan.md).
+
+`demo.py` still runs on the legacy stack. It takes a photo with the camera (or replays `test2/` photos), sends it through Gemini and SAM 2.1, and narrates every step:
 
 ```bash
-cd tests && npm run test:unit          # every package's unit tests, offline
-cd tests && npm run test:integration   # test2/ through the real ingest path, R2 test/ round trip, SpacetimeDB on a throwaway db, mocked SSH
-cd tests && npm run test:images        # LIVE: all test2/ photos through Gemini + SAM + R2 + SpacetimeDB + dashboard API
-cd tests && npm run test:camera -- auto   # real Uno Q: stages 1-6 (then: plate, empty, reliability, cleanup)
-cd tests && npm run test:smoke         # dashboard in Chrome (Playwright)
+python3 demo.py                  # real camera
+python3 demo.py --simulate       # no camera: replay test2/ photos (labeled)
+python3 demo.py --list           # list the steps
 ```
 
-Camera and the dashboard button: `cd capture && npm run take-photo` (settings in `.env`: CAMERA_HOST, CAMERA_USER, CAMERA_SSH_KEY).
-Sample history: `cd backend && npm run demo:seed` (DEMO_SEED=1) / `npm run demo:clear`.
+Upload demo: `node upload_demo/server.mjs`, then open http://localhost:8795 ([upload_demo/README.md](upload_demo/README.md)). A read-only public version of the dashboard runs at [scrapsaver.app](https://scrapsaver.app) ([docs/deploy-server.md](docs/deploy-server.md)).
 
-Individual suites:
+Legacy setup steps (SpacetimeDB CLI 2.10.x, R2 bucket and credentials) are in [docs/environment-setup.md](docs/environment-setup.md) and [docs/EXPLAIN.md](docs/EXPLAIN.md).
+
+</details>
+
+## Testing
 
 ```bash
-cd tests && npm test                          # fixture + formula checks
-(cd <module> && npm test)                     # data capture vision analytics backend frontend
-cd vision && npm run smoke                    # live Gemini smoke test (uses .env key)
-cd tests && SCRAP_E2E=1 npm run test:e2e      # live API flow against the running stack
-cd tests && SCRAP_E2E=1 npm run test:e2e:scrap   # camera sim → R2 → scrap → Gemini+SAM → dashboard API
-python3 capture/scripts/live_camera_test.py --target arduino@<board-ip> --identity ~/.ssh/scrap_unoq --service svc_hall-main_<date>_dinner --spacetime-db scrap   # real Uno Q
+./test-all.sh            # everything offline: every package, the dashboard build, Python, forecasting, weight suite
+./test-all.sh --live     # also starts the local stack: smoke test and live end-to-end suites (test halls only)
+./test-all.sh --list     # list suites; --only a,b / --skip a,b
 ```
 
-### API additions (BIG-PLAN)
+Live checks against Supabase, detection scoring, and the camera test are described in [docs/testing.md](docs/testing.md) and [docs/runbook.md](docs/runbook.md). Live detection runs use Gemini and count toward its API usage.
 
-`start`/`end` are inclusive local service dates (`YYYY-MM-DD`); pass `hallId`.
+## Documentation
 
-| Endpoint | Returns |
-| --- | --- |
-| `GET /api/dashboard/impact?start&end&hallId` | totals (pixels, relative impact points; nutrition points separate), foods to target (pixels per portion), most wasted (pixels), coverage incl. neighbor-food exclusions |
-| `GET /api/captures?start&end&hallId[&limit]` | recent plates with state and pixels per food |
-| `GET /api/captures/:eventId/images` | short-lived URLs for the original photo, segmented overlay, and per-food masks |
-| `GET /api/recommendation?start&end&hallId` | AI recommendation (`gemini`) or labeled rule-based `fallback`, with cited metrics |
-| `GET /api/dashboard/daily` | per-day Pixels wasted |
-| `GET /api/dashboard/totals?today&hallId` | Pixels wasted today, this week (Mon-today), this month (1st-today) |
-| `POST /api/recommendation/regenerate` | asks Gemini again for `{start,end,hallId}`; every recommendation is saved (insight table) with its inputs |
-| `GET /api/camera/status`, `POST /api/camera/take-photo` | `npm run take-photo` (the dashboard has no camera button) |
-| `POST /api/demo/seed`, `POST /api/demo/clear` | labeled sample history (DEMO_SEED=1) and removing it |
+| Topic | Document |
+|---|---|
+| Detection accuracy and timing | [docs/detection-accuracy.md](docs/detection-accuracy.md) |
+| Weight accuracy (Nutrition5k) | [docs/weight-accuracy.md](docs/weight-accuracy.md) |
+| Forecasting methods and results | [docs/forecasting-methods.md](docs/forecasting-methods.md) |
+| Camera calibration | [docs/calibration.md](docs/calibration.md), [checklist](docs/camera-calibration-checklist.md) |
+| Data requested from M-Dining | [docs/data-intake.md](docs/data-intake.md) |
+| Pilot plan | [docs/pilot-runbook.md](docs/pilot-runbook.md) |
+| Known limitations | [docs/known-limitations.md](docs/known-limitations.md) |
+| Impact formula and food factors | [factors/README.md](factors/README.md) |
+| Development log | [docs/PROGRESS.md](docs/PROGRESS.md), run reports `RUN3_REPORT.md`–`RUN6_REPORT.md` |
 
-See [`docs/`](docs/) for the [demo walkthrough](docs/demo-walkthrough.md),
-[runbook](docs/runbook.md), [known limitations](docs/known-limitations.md),
-and the latest [verification report](docs/verification-report.md).
+## Credits
+
+- **Team:** Shaan Barai, Angad Chauhan, Michael Wu, River Tompkins.
+- **Thanks** to the Michigan Dining staff who explained how their kitchens plan, record and handle waste.
+- **Models:**
+  - **Gemini API** (Google), under the [Gemini API Terms](https://ai.google.dev/gemini-api/terms).
+  - **SAM 2.1** (Meta AI), code and checkpoints under Apache 2.0, [github.com/facebookresearch/sam2](https://github.com/facebookresearch/sam2).
+- **Data:**
+  - **Nutrition5k** (Thames et al., CVPR 2021, Google Research), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), [github.com/google-research-datasets/Nutrition5k](https://github.com/google-research-datasets/Nutrition5k).
+  - **Open-Meteo** weather data, [CC BY 4.0](https://open-meteo.com/en/terms).
+  - **Calendar context:** the University of Michigan Registrar's academic calendar, the MGoBlue football schedule, Hebcal and Aladhan.
