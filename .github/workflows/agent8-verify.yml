@@ -20,6 +20,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Install test dependencies
+        run: npm ci
+      # bundle-secrets.test.mjs runs a Vite build of the frontend.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      # Builds data, vision, analytics, capture and backend for the integration tests.
+      - name: Build modules
+        run: npm run build
       - name: Run Agent 8 tests
         run: npm test
 

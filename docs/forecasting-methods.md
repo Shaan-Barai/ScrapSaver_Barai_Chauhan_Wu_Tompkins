@@ -139,9 +139,9 @@ How to read this (still simulated):
 
 ### Tray-waste detection [REAL]
 
-On 12 labeled real plate photos, the AI food detection scored **94.4% recall and 81.0% precision** in each of 3 identical runs (fixed seed, temperature 0). That is 17 correct, 1 missed and 4 wrong each time, against a 26-food menu.
+On 12 labeled real plate photos, with each photo given its own meal's 23-food menu, the AI food detection scored **94.4% recall and 94.4% precision**: 17 correct, 1 missed and 1 wrong, in 1 run.
 
-An earlier 100% / 92.3% was measured on a 23-food menu. Adding three foods explains most of the drop; see [detection-accuracy.md](detection-accuracy.md). This is a small sample from one hall.
+For comparison, the 26-food test menu (three foods the hall did not serve that night) gave **94.4% recall and 81.0% precision** in each of 3 identical runs (fixed seed, temperature 0): 17 correct, 1 missed and 4 wrong each time. See [detection-accuracy.md](detection-accuracy.md). This is a small sample from one hall.
 
 ## 9. Limitations
 
