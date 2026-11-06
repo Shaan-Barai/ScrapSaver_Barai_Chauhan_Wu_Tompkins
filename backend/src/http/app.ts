@@ -570,6 +570,15 @@ export function createApp(deps: AppDeps): express.Express {
       res.status(result.deduplicated ? 200 : 201).json(result);
     }),
   );
+  // Re-run Gemini + SAM on a stored real plate (same eventId, current menu);
+  // the new attempt becomes the counted one only if it succeeds.
+  app.post(
+    '/api/captures/:eventId/reanalyze',
+    geminiCap,
+    wrap(async (req, res) => {
+      res.status(201).json(await ingestion.reanalyzeCapture(param(req, 'eventId')));
+    }),
+  );
 
   // ---- sample history (DEMO_SEED): fill is opt-in, clearing is always allowed ----
   app.post(

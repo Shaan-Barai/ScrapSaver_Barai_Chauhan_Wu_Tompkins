@@ -97,3 +97,42 @@ test('frozen context: the attempt records the menu version and baseline versions
   assert.equal(result.json.attempt.menuVersion, 1);
   assert.deepEqual(result.json.attempt.baselineVersions, { item_eggs: 1, item_toast: 1 });
 });
+
+test('reanalyze: a succeeded plate gets a new counted attempt; a failed re-run keeps the old result', async (t) => {
+  const s = await startTestServer();
+  t.after(() => s.close());
+  await s.seedMenuAndBaselines();
+
+  const eventId = 'cap_reanalyze_1';
+  s.fixtures[eventId] = { measurements: [{ itemId: 'item_eggs', remainingAreaPx: 5000 }] };
+  const objectId = await s.uploadImage(eventId);
+  const first = await s.submitCapture(eventId, objectId);
+  assert.equal(first.json.event.state, 'succeeded');
+  await new Promise((r) => setTimeout(r, 5)); // attempts are ordered by createdAt (ms)
+
+  // Same photo, better analysis: the new attempt replaces the counted result.
+  s.fixtures[eventId] = { measurements: [{ itemId: 'item_toast', remainingAreaPx: 7000 }] };
+  const redo = await s.api('POST', `/api/captures/${eventId}/reanalyze`);
+  assert.equal(redo.status, 201);
+  assert.equal(redo.json.event.state, 'succeeded');
+  let detail = await s.api('GET', `/api/captures/${eventId}`);
+  assert.equal(detail.json.attempts.length, 2, 'the first attempt stays as history');
+  assert.equal(detail.json.countedAttemptId, redo.json.attempt.attemptId);
+  assert.deepEqual(detail.json.measurements.map((m: any) => [m.itemId, m.remainingAreaPx]), [['item_toast', 7000]]);
+  await new Promise((r) => setTimeout(r, 5));
+
+  // A failed re-run is recorded, but the plate keeps its counted result.
+  s.fixtures[eventId] = { status: 'failed', errorCode: 'GEMINI_TIMEOUT' };
+  const failed = await s.api('POST', `/api/captures/${eventId}/reanalyze`);
+  assert.equal(failed.json.attempt.status, 'failed');
+  assert.equal(failed.json.event.state, 'succeeded');
+  detail = await s.api('GET', `/api/captures/${eventId}`);
+  assert.equal(detail.json.attempts.length, 3);
+  assert.equal(detail.json.countedAttemptId, redo.json.attempt.attemptId);
+
+  const summary = await s.api('GET', `/api/dashboard/summary?hallId=hall-main&serviceId=${first.json.event.serviceId}`);
+  assert.equal(summary.json.totals.capturedDishes, 1, 're-analysis never duplicates the dish');
+  assert.equal(summary.json.totals.observedRemainingAreaPx, 7000);
+
+  assert.equal((await s.api('POST', '/api/captures/cap_missing/reanalyze')).status, 404);
+});

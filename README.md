@@ -217,6 +217,7 @@ python3 capture/scripts/live_camera_test.py --target arduino@<board-ip> --identi
 | `GET /api/recommendation?start&end&hallId` | AI recommendation (`gemini`) or labeled rule-based `fallback`, with cited metrics |
 | `GET /api/dashboard/daily` | per-day Pixels wasted |
 | `GET /api/dashboard/totals?today&hallId` | Pixels wasted today, this week (Mon-today), this month (1st-today) |
+| `POST /api/captures/:eventId/reanalyze` | re-runs Gemini + SAM on a stored real plate (same eventId, the service's current menu); counted only if it succeeds. Script: `backend/scripts/reanalyze.mjs` |
 | `POST /api/recommendation/regenerate` | asks Gemini again for `{start,end,hallId}`; every recommendation is saved (insight table) with its inputs |
 | `GET /api/camera/status`, `POST /api/camera/take-photo` | `npm run take-photo` (the dashboard has no camera button) |
 | `POST /api/demo/seed`, `POST /api/demo/clear` | labeled sample history (DEMO_SEED=1) and removing it |

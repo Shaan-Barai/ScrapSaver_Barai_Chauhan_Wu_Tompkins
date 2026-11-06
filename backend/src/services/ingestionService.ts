@@ -7,6 +7,8 @@
  *   - `failed`/`needs_review`/`pending` -> a RETRY runs a new analysis
  *     attempt on the SAME event (attempts are append-only history),
  *   - `processing` -> the in-flight state is returned.
+ * reanalyzeCapture() deliberately re-runs a stored plate (new attempt, same
+ * event); the latest succeeded attempt is always the counted one.
  *
  * Processing states: pending -> processing -> succeeded | needs_review | failed.
  *
@@ -19,7 +21,7 @@
  * (see repo/repository.ts), never this orchestration.
  */
 
-import { badRequest, notFound, apiError } from '../errors.js';
+import { badRequest, conflict, notFound, apiError } from '../errors.js';
 import { validMaskCount } from '@scrap/analytics';
 import { newId } from '../ids.js';
 import type { Analyzer } from '../analysis/analyzer.js';
@@ -99,7 +101,50 @@ export class IngestionService {
         deduplicated: true,
       };
     }
+    return this.analyzeCapture(submission, existing, false);
+  }
 
+  /**
+   * Re-run Gemini + SAM on a stored capture (2026-11-05): same eventId, same
+   * photo, and the service's CURRENT menu, so food added to the menu later
+   * (or a fixed counting rule) reaches plates analyzed before. The new attempt
+   * is appended and, as the latest succeeded one, becomes the counted result.
+   * A failed re-analysis is kept as history and the earlier result stays
+   * counted (the plate stays `succeeded`). Demo copies are refused: re-analyze
+   * the real plate, then spread the copies again.
+   */
+  async reanalyzeCapture(eventId: string): Promise<IngestResult> {
+    const existing = await this.repo.getCaptureEvent(eventId);
+    if (!existing) throw notFound('CAPTURE_NOT_FOUND', 'No capture event has this ID.', { eventId });
+    if (existing.source === 'demo') {
+      throw badRequest('DEMO_CAPTURE', 'Demo rows repeat a real plate. Re-analyze the real plate, then spread the demo copies again.', { eventId });
+    }
+    if (existing.state === 'processing') {
+      throw conflict('CAPTURE_PROCESSING', 'This plate is being analyzed right now. Try again when it finishes.', { eventId });
+    }
+    const hadCounted = (await this.countedAttempt(eventId)) !== undefined;
+    return this.analyzeCapture(
+      {
+        eventId: existing.eventId,
+        hallId: existing.hallId,
+        serviceId: existing.serviceId,
+        capturedAt: existing.capturedAt,
+        imageObjectId: existing.imageObjectId,
+        geometry: existing.geometry,
+        source: existing.source,
+        qualityFlags: existing.qualityFlags,
+      },
+      existing,
+      hadCounted,
+    );
+  }
+
+  /** One new analysis attempt for `submission` (validation, Gemini + SAM, persistence). */
+  private async analyzeCapture(
+    submission: CaptureSubmission,
+    existing: CaptureEvent | undefined,
+    keepCountedOnFailure: boolean,
+  ): Promise<IngestResult> {
     // Verify the image object: it must exist, be finalized, and belong to
     // THIS capture (5.7: register only verified objects for the intended upload).
     const image = await this.repo.getImageObject(submission.imageObjectId);
@@ -257,7 +302,7 @@ export class IngestionService {
     this.providerStatus.observe(attempt.status, attempt.error?.code);
 
     const finalState: ProcessingState =
-      attempt.status === 'succeeded'
+      attempt.status === 'succeeded' || keepCountedOnFailure
         ? 'succeeded'
         : attempt.status === 'needs_review'
           ? 'needs_review'

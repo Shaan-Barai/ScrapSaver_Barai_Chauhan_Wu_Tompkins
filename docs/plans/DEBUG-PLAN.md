@@ -110,6 +110,7 @@ Priority: **P1** wrong numbers or a broken path a user sees; **P2** reliability 
 | Database rows | `spacetime sql --server local scrap "SELECT … FROM capture_event / analysis_attempt / food_measurement / image_object / capture_visibility"` |
 | One capture, full detail | `curl -s localhost:8787/api/captures/<eventId>` · images: `…/<eventId>/images` |
 | Retry failed analyses (same eventId) | `node backend/scripts/retry-failed.mjs --start <date> --end <date> --dry-run` first |
+| Re-analyze plates that already succeeded (same eventId, current menu; ~2-3 Gemini calls each) | `node backend/scripts/reanalyze.mjs --events cap_A,cap_B --dry-run` first; then `npm run demo:clear` and re-spread the copies with the same `endDate` |
 | Workers | `curl -s 127.0.0.1:8790/health` (SAM) · `curl -s localhost:8787/api/ready` |
 | Show or hide plates | Dashboard → Admin (staff sign-in) |
 
@@ -117,7 +118,7 @@ Priority: **P1** wrong numbers or a broken path a user sees; **P2** reliability 
 
 | ID | State | Reproduction | Fix (commit) | Verified how | Notes |
 | --- | --- | --- | --- | --- | --- |
-| D1 | fixed (offline) | `vision/test/targetDish.test.ts` "dish mask misses part of the dish…" (failed: on-target food `skipped`) | `c938669`, `27cd4d3` | vision 91/91 offline | `dish-region-v3`: region ∪ ellipse inscribed in Gemini's dish box. Root cause inferred from the overlay (SAM dish mask covered ~half the bowl, passed the 50% check); cap_01M42PEM… not re-analyzed (needs Gemini) |
+| D1 | fixed (offline) | `vision/test/targetDish.test.ts` "dish mask misses part of the dish…" (failed: on-target food `skipped`) | `c938669`, `27cd4d3` | vision 91/91 offline | `dish-region-v3`: region ∪ ellipse inscribed in Gemini's dish box. Root cause inferred from the overlay (SAM dish mask covered ~half the bowl, passed the 50% check). Live 2026-11-05: `reanalyze.mjs` on cap_01M42PEM… → 75,687 → 232,369 px, nothing hatched; trays running off the frame edge (cap_01M42QBZ…, cap_01M42QDP…) still lose a bottom strip (52k / 28k px) |
 | D2 | fixed | `backend/test/galleryTotals.test.ts` (gallery 800 vs totals 0) | `332651a` | backend + frontend offline | Gallery reuses `selectImpactMeasurements`; rejected plates get `pixelsWasted: null` + `notCountedReason`. No live plate affected: ingestion already rejects mask counts without `maskCount` |
 | D3 | fixed (bridge) | `capture/test/bridge.test.ts` "D3: one inbox frame is ingested once…" | `1ab3f5d` | capture 54/54 offline | The two live captures are **different photos** (different bytes/keys), likely a second shot of the same tray: the user decides whether to hide the lunch one on Admin. Bridge now writes `<inbox>/.ingest-claims.json`; concurrent runs can still race |
 | D4 | fixed (refs) | `git grep` 64 → 3 deliberate fallbacks | `315f7b3` | guard `tests/integration/no-stale-data-filenames.test.mjs` | One real bug: `vision/scripts/waste-impact.mjs` defaulted to the old nutrition CSV. `menu_waste_factors_500.csv` is already wired as the common-foods fallback (generate-factors, demo.py). Open: meaning of `_EastQuad` |
@@ -134,6 +135,7 @@ Priority: **P1** wrong numbers or a broken path a user sees; **P2** reliability 
 | D15 | fixed (copy) | — | `4aa8c7d` | review of server timeouts | Upload page now says one at a time, last 20 kept, lost on restart. No local timeout on queued waits; a Cloudflare tunnel (~100 s) could still cut long waits (unchecked) |
 
 ### Log
+- 2026-11-05: re-analyzed 6 real plates with Gemini + SAM (`POST /api/captures/:eventId/reanalyze`): D1's diagonal-cut bowl, two lunch trays cut by the dish clip, and three dinner plates whose chicken/rice stayed "Food not on the menu" because Halal items joined the dinner menu after they were scanned (menu v1 → v3). Demo copies re-spread (same 56 days to 2026-11-01): unclassified pixels 16.4M → 0.
 - 2026-10-04: D7 live: after `deploy/local.sh restart`, `/api/health` reports commit, start time and
   `waste-factors-v7`, and `local.sh status` prints "matches checkout". Same deploy shipped the new
   Try an Image tab (Behind the scenes) on scrapsaver.app.
