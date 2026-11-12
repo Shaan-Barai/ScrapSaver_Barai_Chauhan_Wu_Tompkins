@@ -16,12 +16,18 @@ import struct
 import subprocess
 import sys
 import tempfile
-import threading
+import time
 import uuid
 import zipfile
 
 MAX_JPEG_BYTES = 16 * 1024 * 1024
 MAX_BUNDLE_BYTES = MAX_JPEG_BYTES + 64 * 1024
+# ssh's own messages when the TCP connection never opens (not auth or camera failures).
+SSH_CONNECT_FAILURE = re.compile(
+    rb"connect to host .* port \d+: |Connection to .* port \d+ timed out|Could not resolve hostname"
+    rb"|Connection timed out during banner exchange"
+)
+CONNECT_RETRY_SECONDS = 3
 
 
 def ssh_command(args, remote_command):
@@ -42,13 +48,62 @@ def ssh_command(args, remote_command):
             "-o", "PubkeyAuthentication=no",
             "-o", "PreferredAuthentications=password,keyboard-interactive",
         ])
-    command.extend([
-        "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5",
-        "-o", "ServerAliveCountMax=2", args.target, remote_command,
-    ])
+    # No ConnectTimeout or ServerAlive limits: a slow board gets unlimited time (Ctrl+C stops).
+    command.extend([args.target, remote_command])
     if interactive:
         print("If SSH asks for a password, enter the Arduino/App Lab board password.", flush=True)
     return command, interactive
+
+
+def run_ssh(args, remote_command):
+    """Run one SSH command, retrying until the board answers; returns (command, CompletedProcess).
+
+    The OS still gives up on a single TCP connect (~75 s on macOS), so connection failures are
+    retried with no overall limit (Ctrl+C stops). Auth and remote-command failures are returned.
+    """
+    command, _ = ssh_command(args, remote_command)
+    attempt = 1
+    while True:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 255 and SSH_CONNECT_FAILURE.search(result.stderr):
+            detail = result.stderr.decode("utf-8", errors="replace").strip().splitlines()[-1]
+            print(f"Board not reachable yet ({detail}); retry {attempt} in "
+                  f"{CONNECT_RETRY_SECONDS} s. Ctrl+C stops.", flush=True)
+            attempt += 1
+            time.sleep(CONNECT_RETRY_SECONDS)
+            continue
+        return command, result
+
+
+def camera_node(listing, name):
+    """First /dev/video node listed under the camera whose name contains `name` (v4l2-ctl --list-devices)."""
+    current = None
+    for line in listing.splitlines():
+        if not line.strip():
+            current = None
+        elif not line[0].isspace():
+            current = line.strip()
+        elif current and name.lower() in current.lower() and line.strip().startswith("/dev/video"):
+            return line.strip(), current
+    return None, None
+
+
+def resolve_device(args):
+    """--device auto: ask the board which /dev/video node is the camera (it moves after a replug or reboot)."""
+    if args.device != "auto":
+        return args.device
+    command, result = run_ssh(args, "v4l2-ctl --list-devices")
+    if result.returncode == 255:
+        raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
+    # v4l2-ctl exits 1 when one node can't be opened even though the listing is complete.
+    listing = result.stdout.decode("utf-8", errors="replace")
+    device, label = camera_node(listing, args.device_name)
+    if device is None:
+        shown = (listing or result.stderr.decode("utf-8", errors="replace")).strip() or "(nothing)"
+        raise ValueError(f"No camera named {args.device_name!r} on the board. Is the webcam plugged into the hub? "
+                         f"v4l2-ctl --list-devices shows:\n{shown}")
+    print(f"Camera: {device} ({label})", flush=True)
+    return device
 
 
 def focus_arguments(args):
@@ -89,11 +144,11 @@ def receive_automatic(args):
         raise ValueError("A manual capture is pending. Retry it with --once before starting --auto.")
     remote_command = shlex.join([
         "/usr/bin/python3", args.remote_script, "--stream",
-        "--device", args.device, "--width", str(args.width), "--height", str(args.height),
+        "--device", resolve_device(args), "--width", str(args.width), "--height", str(args.height),
         "--warmup", str(args.warmup), "--interval", str(args.interval), "--count", str(args.count),
         *focus_arguments(args),
     ])
-    command, interactive = ssh_command(args, remote_command)
+    command, _ = ssh_command(args, remote_command)
     print(f"Automatic photos every {args.interval:g} seconds. Ctrl+C stops capture.", flush=True)
     print("Timed frames can show the same dish; dish identity is unresolved.", flush=True)
     focus_reported = False
@@ -101,33 +156,14 @@ def receive_automatic(args):
     received = 0
     try:
         while True:
-            expired = threading.Event()
-
-            def stop_stalled_transfer(expired=expired):
-                expired.set()
-                process.kill()
-
-            timeout = max(120 if interactive and received == 0 else 30, args.warmup + args.interval + 15)
-            watchdog = threading.Timer(timeout, stop_stalled_transfer)
-            watchdog.daemon = True
-            watchdog.start()
-            try:
-                header = read_exact(process.stdout, 20, allow_eof=True)
-                if header is not None:
-                    size = struct.unpack("!I", header[:4])[0]
-                    if not 0 < size <= MAX_BUNDLE_BYTES:
-                        raise ValueError("The streamed photo bundle is empty or too large.")
-                    capture_id = str(uuid.UUID(bytes=header[4:]))
-                    data = read_exact(process.stdout, size)
-            except (ValueError, OSError) as error:
-                if expired.is_set():
-                    raise TimeoutError("No complete photo arrived before the transfer timeout. Check the board/network.") from error
-                raise
-            finally:
-                watchdog.cancel()
-                watchdog.join()
-            if expired.is_set():
-                raise TimeoutError("No complete photo arrived before the transfer timeout. Check the board/network.")
+            # No transfer watchdog: wait as long as the board needs (Ctrl+C stops).
+            header = read_exact(process.stdout, 20, allow_eof=True)
+            if header is not None:
+                size = struct.unpack("!I", header[:4])[0]
+                if not 0 < size <= MAX_BUNDLE_BYTES:
+                    raise ValueError("The streamed photo bundle is empty or too large.")
+                capture_id = str(uuid.UUID(bytes=header[4:]))
+                data = read_exact(process.stdout, size)
             if header is None:
                 status = process.wait(timeout=5)
                 if status or not args.count or received != args.count:
@@ -249,22 +285,21 @@ def receive_capture(args):
             os.fsync(file.fileno())
         os.replace(temporary, pending_path)
 
+    device = resolve_device(args)
     print(f"Requesting {capture_id} ...", flush=True)
+    # No time limit on the board or the transfer (Ctrl+C stops).
     remote_command = shlex.join([
-        "timeout", "--signal=TERM", "--kill-after=2s", "20s",
         "/usr/bin/python3", args.remote_script,
         "--capture-id", capture_id,
-        "--device", args.device,
+        "--device", device,
         "--width", str(args.width), "--height", str(args.height),
         "--warmup", str(args.warmup),
         *focus_arguments(args),
     ])
-    command, interactive = ssh_command(args, remote_command)
-    result = subprocess.run(
-        command, stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        timeout=150 if interactive else 45, check=True,
-    )
+    # Safe to retry: a retry reuses this capture ID and the board's cached photo.
+    command, result = run_ssh(args, remote_command)
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
     photo, metadata = validate_bundle(result.stdout, capture_id)
     if args.calibrate:
         # The bridge never ingests this frame as a dish; `npm run calibrate` uploads it.
@@ -289,7 +324,10 @@ def receive_capture(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, help="arduino@board-IP-or-hostname")
-    parser.add_argument("--device", default="/dev/video0")
+    parser.add_argument("--device", default=os.environ.get("CAMERA_DEVICE") or "auto",
+                        help="Camera node on the board, or auto (default): find it by --device-name")
+    parser.add_argument("--device-name", default=os.environ.get("CAMERA_DEVICE_NAME") or "C920",
+                        help="With --device auto: part of the camera's name in v4l2-ctl --list-devices")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--warmup", type=float, default=2.0)

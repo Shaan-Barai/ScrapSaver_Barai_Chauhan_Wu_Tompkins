@@ -44,10 +44,11 @@ i = 0
 while args[i].startswith("-"):
     i += 2 if args[i] in ("-i", "-o") else 1
 remote = shlex.split(args[i + 1])
-prefix = ["timeout", "--signal=TERM", "--kill-after=2s", "20s", "/usr/bin/python3"]
-if remote[:5] == prefix:
-    script_args = remote[5:]
-elif remote[:1] == ["/usr/bin/python3"] and "--stream" in remote:
+if remote == ["v4l2-ctl", "--list-devices"]:
+    print("HD Pro Webcam C920 (usb-xhci-hcd.1.auto-1.2):\\n\\t/dev/video0\\n\\t/dev/video1\\n\\t/dev/media0\\n")
+    sys.exit(0)
+# Captures run with no time limit on the board: plain /usr/bin/python3, no `timeout` wrapper.
+if remote[:1] == ["/usr/bin/python3"]:
     script_args = remote[1:]
 else:
     sys.exit("fake ssh: unexpected remote command " + args[i + 1])
@@ -416,7 +417,10 @@ class SimulatedRig(unittest.TestCase):
             self.assertGreater((after - before).total_seconds(), 0.85)
             self.assertLess((after - before).total_seconds(), 1.5)
         self.assertEqual(self.camera_opens(), 1, "automatic capture must keep one FFmpeg session")
-        self.assertEqual(len(self.ssh_log.read_text().splitlines()), 1)
+        # One detection call (--device auto), then one streaming session.
+        ssh_calls = [json.loads(line)[-1] for line in self.ssh_log.read_text().splitlines()]
+        self.assertEqual(ssh_calls[0], "v4l2-ctl --list-devices")
+        self.assertEqual(len(ssh_calls), 2)
         [invocation] = (self.root / "ffmpeg.log").read_text().splitlines()
         args = json.loads(invocation)
         self.assertEqual(args[args.index("-c:v") + 1], "copy")
@@ -570,7 +574,7 @@ class FocusLock(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         [directory] = self.capture_dirs()
         self.assertEqual(self.assert_saved(directory)["focus"]["absolute"], 40)
-        invocation = json.loads(self.ssh_log.read_text().splitlines()[0])
+        invocation = json.loads(self.ssh_log.read_text().splitlines()[-1])
         self.assertIn("--focus-absolute 40", invocation[-1])
 
     def test_default_focus_is_not_passed_so_older_board_scripts_still_run(self):
@@ -897,6 +901,29 @@ class SaveCapture(unittest.TestCase):
         other = dict(self.metadata, capturedAt="2026-10-03T18:00:00Z")
         with self.assertRaisesRegex(ValueError, "different local photo"):
             laptop.save_capture(self.out, self.photo, other)
+
+
+class DeviceDetection(unittest.TestCase):
+    """--device auto: the C920's node moves (video0 on one boot, video2 on the next)."""
+
+    LISTING = (
+        "qcom-venus (platform:aa00000.video-codec):\n\t/dev/video0\n\t/dev/video1\n\n"
+        "HD Pro Webcam C920 (usb-xhci-hcd.1.auto-1.2):\n\t/dev/video2\n\t/dev/video3\n\t/dev/media1\n"
+    )
+
+    def test_picks_first_node_under_the_named_camera(self):
+        device, label = laptop.camera_node(self.LISTING, "c920")
+        self.assertEqual(device, "/dev/video2")
+        self.assertTrue(label.startswith("HD Pro Webcam C920"))
+
+    def test_missing_camera_is_none(self):
+        self.assertEqual(laptop.camera_node(self.LISTING, "Brio"), (None, None))
+
+    def test_retry_matches_openssh_10_timeout_wording(self):
+        for line in (b"ssh: connect to host 35.3.210.195 port 22: Operation timed out",
+                     b"Connection to 35.3.210.195 port 22 timed out"):
+            self.assertTrue(laptop.SSH_CONNECT_FAILURE.search(line), line)
+        self.assertIsNone(laptop.SSH_CONNECT_FAILURE.search(b"arduino@35.3.210.195: Permission denied (publickey)."))
 
 
 if __name__ == "__main__":
