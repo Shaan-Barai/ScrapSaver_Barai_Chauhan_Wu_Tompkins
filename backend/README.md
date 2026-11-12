@@ -108,7 +108,7 @@ throwaway database (e.g. `scrap-test`), then
 - `SERVE_FRONTEND=1` serves `FRONTEND_DIST` from the same origin: `assets/*`
   `Cache-Control: immutable` (1 year), everything else `no-cache`, SPA fallback
   to `index.html` for non-`/api` GETs.
-- Local production run (what `deploy/local-up.sh` does):
+- Local production run (what `deploy/local.sh up` does):
   `NODE_ENV=production SERVE_FRONTEND=1 PORT=8787 npm start` with the secrets
   in `.env`. SpacetimeDB maincloud URIs use the same `/v1/database/<db>/{call,sql}`
   HTTP paths, so only `SPACETIMEDB_URI`/`TOKEN` change (not exercised: Fly.io

@@ -8,7 +8,6 @@ other modules build against. Change it only through Agent 1.
 - `types.ts` — entity and error type definitions (TypeScript, dependency-free).
   Additive `PortionsServed` / `MaskPixelCount` types support the per-portion
   recommendation benchmark; mask inference remains pending.
-- `samples.json` — one valid sample record per entity, usable as fixtures.
 - `decisions.md` — recorded stack decisions and open questions.
 - `measurement.md` — current classification → segmentation → pixel-count contract and migration scope.
   Runtime shapes: `AnalysisAttempt.segmentation` (`SegmentationResult` +

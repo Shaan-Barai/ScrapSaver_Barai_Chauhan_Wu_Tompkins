@@ -20,8 +20,8 @@ jobs:
           node-version: '20'
       - name: Shell syntax + shellcheck
         run: |
-          bash -n deploy/local.sh deploy/local-up.sh deploy/local-down.sh
-          shellcheck -S warning deploy/local.sh deploy/local-up.sh deploy/local-down.sh
+          bash -n deploy/local.sh
+          shellcheck -S warning deploy/local.sh
       - name: Smoke script parses
         run: node --check deploy/smoke.mjs
       - name: Usage exits 2 without a command

@@ -11,8 +11,8 @@
  *   baselineId = base_<itemId minus "item_">_v<version>
  *
  * `_` separates ID fields, so hallId itself may not contain `_`
- * (enforced by validateHallId). Menu IDs are per hall+date+MEAL — not per
- * date as in contracts/samples.json — because MenuItem joins to its menu by
+ * (enforced by validateHallId). Menu IDs are per hall+date+MEAL, not per
+ * date, because MenuItem joins to its menu by
  * menuId alone and breakfast/lunch/dinner carry different item lists.
  * A date-scoped menuId would make per-service item resolution ambiguous.
  * Recorded as an Agent 2 assumption in data/README.md.

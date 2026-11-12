@@ -4,8 +4,7 @@
  * Writes data/seed/demo-seed.json: 3 days x 3 meals of fictional but
  * plausible dining-hall menus for hall "hall-main" (America/Detroit), plus a
  * manual_area reference portion for every item in the shared 1024x1024
- * "topdown-normalized-v1" space (round plate, 900px diameter — matching
- * contracts/samples.json).
+ * "topdown-normalized-v1" space (round plate, 900px diameter).
  *
  * Breakfast and lunch menus are invented. Every dinner (BIG-PLAN D6) is the
  * test dining hall's 26-food dinner menu from menu_waste_factors_EastQuad.csv: display
