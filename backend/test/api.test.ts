@@ -30,11 +30,6 @@ test('missing menu returns the shared ApiError envelope', async (t) => {
   assert.equal(cap.json.error.code, 'MENU_NOT_FOUND');
   assert.equal(typeof cap.json.error.message, 'string');
   assert.equal(cap.json.error.retryable, false);
-
-  // Summary for a serviceless hall: envelope again.
-  const sum = await s.api('GET', `/api/dashboard/summary?hallId=${HALL}&serviceId=${SERVICE}`);
-  assert.equal(sum.status, 404);
-  assert.equal(sum.json.error.code, 'MENU_NOT_FOUND');
 });
 
 test('menu upload is validated and retrievable by hall/date/service', async (t) => {
@@ -56,61 +51,6 @@ test('menu upload is validated and retrievable by hall/date/service', async (t) 
   const byService = await s.api('GET', `/api/menus/by-service/${SERVICE}`);
   assert.equal(byService.status, 200);
   assert.equal(byService.json.menu.items.length, MENU.items.length);
-});
-
-test('suggestions are explicitly unavailable until Agent 6 stores an Insight', async (t) => {
-  const s = await startTestServer();
-  t.after(() => s.close());
-
-  const none = await s.api('GET', `/api/suggestions?hallId=${HALL}`);
-  assert.equal(none.status, 404);
-  assert.equal(none.json.error.code, 'SUGGESTIONS_UNAVAILABLE');
-  assert.equal(none.json.error.retryable, true);
-
-  const insight = {
-    insightId: 'ins_test_1',
-    hallId: HALL,
-    windowStart: '2026-10-03T00:00:00Z',
-    windowEnd: '2026-10-03T23:59:59Z',
-    metrics: { topItemId: 'item_eggs' },
-    dataVersion: 'agg-v1',
-    recommendation: 'Try a smaller scrambled-eggs batch at lunch.',
-    source: 'fallback_rules',
-    generatedAt: '2026-10-03T17:00:00Z',
-  };
-  const stored = await s.api('POST', '/api/suggestions', insight);
-  assert.equal(stored.status, 201);
-
-  const got = await s.api('GET', `/api/suggestions?hallId=${HALL}`);
-  assert.equal(got.status, 200);
-  assert.deepEqual(got.json.insights, [insight]);
-});
-
-test('attendance is stored once and never regenerated per request', async (t) => {
-  const s = await startTestServer();
-  t.after(() => s.close());
-
-  const missing = await s.api('GET', `/api/attendance?serviceId=${SERVICE}`);
-  assert.equal(missing.status, 404);
-  assert.equal(missing.json.error.code, 'ATTENDANCE_NOT_FOUND');
-
-  const record = {
-    hallId: HALL,
-    serviceId: SERVICE,
-    serviceDate: '2026-10-03',
-    count: 742,
-    source: 'simulated',
-    configuredMin: 300,
-    configuredMax: 1200,
-    generatorVersion: 'attendance-gen-v1',
-  };
-  const first = await s.api('PUT', '/api/attendance', record);
-  assert.equal(first.status, 201);
-  // A second write for the same service keeps the first stable value.
-  const second = await s.api('PUT', '/api/attendance', { ...record, count: 999 });
-  assert.equal(second.status, 200);
-  assert.equal(second.json.attendance.count, 742);
-  assert.equal(second.json.created, false);
 });
 
 test('capture submissions reject unfinalized or mismatched images', async (t) => {

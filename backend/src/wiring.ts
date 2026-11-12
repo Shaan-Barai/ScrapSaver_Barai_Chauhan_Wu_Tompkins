@@ -21,7 +21,6 @@ import { R2Storage } from './storage/r2Storage.js';
 import type { ObjectStorageAdapter } from './storage/objectStorage.js';
 import { ImageService } from './services/imageService.js';
 import { IngestionService } from './services/ingestionService.js';
-import { SummaryService } from './services/summaryService.js';
 import { DashboardService } from './services/dashboardService.js';
 import { DishMatchService } from './services/dishMatchService.js';
 import { DemoService } from './services/demoService.js';
@@ -50,7 +49,7 @@ export interface BuildOptions {
   segmenter?: Segmenter;
   /** Calibration runner; defaults to vision's runCalibration when live. */
   calibrationRunner?: CalibrationRunner;
-  /** 'Try an Image' analysis runner; defaults to the lazy upload_demo pipeline. */
+  /** 'Try an Image' analysis runner; defaults to the lazy backend/scripts/try-image-pipeline.mjs. */
   tryImageRunner?: TryImageRunner;
   now?: () => number;
 }
@@ -121,7 +120,6 @@ export function buildBackend(options: BuildOptions = {}): AppDeps & { app: Retur
   const segmenter = options.segmenter ?? createSamWorkerClient(config.samWorkerUrl, undefined, config.workerToken ?? '');
   const analyzer = options.analyzer ?? (gateway.mode === 'live' ? new MaskAnalyzer(gateway, segmenter) : new MockAnalyzer());
   const ingestion = new IngestionService(repo, images, analyzer, now, physicalLabelSuffix);
-  const summary = new SummaryService(repo, ingestion);
   const dashboard = new DashboardService(repo, ingestion, config, gateway.mode === 'live' ? gateway : undefined);
   // Same-dish checks for the camera bridge never run on mock text (BRIDGE.md §4.4).
   const dishMatch = new DishMatchService(gateway.mode === 'live' ? gateway : undefined);
@@ -148,7 +146,6 @@ export function buildBackend(options: BuildOptions = {}): AppDeps & { app: Retur
     storage,
     images,
     ingestion,
-    summary,
     dashboard,
     dishMatch,
     captures,

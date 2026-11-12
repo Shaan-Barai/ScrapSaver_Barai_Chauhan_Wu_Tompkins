@@ -2,7 +2,7 @@
  * "Try an Image": a public, in-memory, one-at-a-time analysis of a visitor's
  * photo (Gemini classify + boxes -> SAM 2.1 -> counted pixels). Nothing is
  * written to R2 or SpacetimeDB, so these uploads never reach dashboard data.
- * The pipeline (upload_demo/pipeline.mjs) is imported lazily on first use so
+ * The pipeline (backend/scripts/try-image-pipeline.mjs) is imported lazily on first use so
  * backend startup and tests never load vision/sharp.
  */
 
@@ -29,11 +29,11 @@ export function repoRoot(): string {
   return at >= 0 ? resolve(here.slice(0, at), '..') : resolve(dirname(here), '../../..');
 }
 
-/** Lazy runner around upload_demo/pipeline.mjs (absolute path computed at runtime). */
+/** Lazy runner around backend/scripts/try-image-pipeline.mjs (absolute path computed at runtime). */
 export function createPipelineRunner(opts: { samWorkerUrl: string; workerToken?: string }): TryImageRunner {
   let ready: Promise<{ run: (bytes: Buffer) => Promise<TryImageRunResult> }> | undefined;
   const load = async () => {
-    const modPath = join(repoRoot(), 'upload_demo', 'pipeline.mjs');
+    const modPath = join(repoRoot(), 'backend', 'scripts', 'try-image-pipeline.mjs');
     const p = (await import(pathToFileURL(modPath).href)) as any;
     const foods = p.loadFoodDatabase();
     const gateway = p.createGeminiGateway();

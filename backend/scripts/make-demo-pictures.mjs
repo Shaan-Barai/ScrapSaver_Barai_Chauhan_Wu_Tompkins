@@ -2,7 +2,7 @@
  * Writes demo_pictures/: every pipeline stage for the halal chicken + rice bowl
  * (labels: Halal Chicken, Halal Rice), plus results.json.
  *
- *   node upload_demo/make-demo-pictures.mjs [photo]
+ *   node backend/scripts/make-demo-pictures.mjs [photo]
  *
  * Live: needs GEMINI_API_KEY in .env and the SAM 2.1 worker on SAM_WORKER_URL
  * (default http://localhost:8790). Two Gemini calls per run.
@@ -10,7 +10,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { REPO, createGeminiGateway, createSamWorkerClient, loadFoodDatabase, runSteps } from './pipeline.mjs';
+import { REPO, createGeminiGateway, createSamWorkerClient, loadFoodDatabase, runSteps } from './try-image-pipeline.mjs';
 
 try { process.loadEnvFile(path.join(REPO, '.env')); } catch {}
 

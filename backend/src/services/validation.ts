@@ -8,10 +8,8 @@
 
 import { badRequest } from '../errors.js';
 import type {
-  Attendance,
   CaptureSource,
   ImageGeometry,
-  Insight,
   MealLabel,
   MenuBundle,
   QualityFlag,
@@ -175,47 +173,3 @@ function validateScan(scan: unknown): void {
   }
 }
 
-export function validateAttendance(body: unknown): Attendance {
-  const a = body as Partial<Attendance> | undefined;
-  if (
-    !a ||
-    !isNonEmptyString(a.hallId) ||
-    !isNonEmptyString(a.serviceId) ||
-    !isNonEmptyString(a.serviceDate) ||
-    !Number.isInteger(a.count) ||
-    (a.count as number) < 0 ||
-    a.source !== 'simulated' ||
-    !Number.isInteger(a.configuredMin) ||
-    !Number.isInteger(a.configuredMax) ||
-    !isNonEmptyString(a.generatorVersion)
-  ) {
-    throw badRequest(
-      'INVALID_ATTENDANCE',
-      "Attendance needs hallId, serviceId, serviceDate, integer count >= 0, source 'simulated', configuredMin/Max, and generatorVersion.",
-    );
-  }
-  return a as Attendance;
-}
-
-export function validateInsight(body: unknown): Insight {
-  const i = body as Partial<Insight> | undefined;
-  if (
-    !i ||
-    !isNonEmptyString(i.insightId) ||
-    !isNonEmptyString(i.hallId) ||
-    !isNonEmptyString(i.windowStart) ||
-    !isNonEmptyString(i.windowEnd) ||
-    typeof i.metrics !== 'object' ||
-    i.metrics === null ||
-    !isNonEmptyString(i.dataVersion) ||
-    !isNonEmptyString(i.recommendation) ||
-    (i.source !== 'gemini' && i.source !== 'fallback_rules') ||
-    !isNonEmptyString(i.generatedAt)
-  ) {
-    throw badRequest(
-      'INVALID_INSIGHT',
-      'An insight needs insightId, hallId, window, metrics, dataVersion, recommendation, source (gemini/fallback_rules), and generatedAt.',
-    );
-  }
-  return i as Insight;
-}

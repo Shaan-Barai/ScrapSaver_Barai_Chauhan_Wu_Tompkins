@@ -211,9 +211,8 @@ cmd_push() {
   fi
 
   say "shipping $(git -C "$REPO" rev-parse --short HEAD) to $(server)"
-  # Photos, experiments and the archived app are not needed to serve the site.
-  git -C "$REPO" archive --format=tar HEAD -- . ':!test2' ':!demo_pictures' ':!images' ':!archive' \
-      ':!experiments' ':!demo-tests-2' ':!tests/fixtures' \
+  # Test photos are not needed to serve the site.
+  git -C "$REPO" archive --format=tar HEAD -- . ':!test2' ':!demo_pictures' ':!images' \
     | gzip | ssh "${SSH_OPTS[@]}" "$(server)" \
       "sudo -n bash -c 'rm -rf /opt/scrapsaver/staging && install -d /opt/scrapsaver/staging && tar -xzf - -C /opt/scrapsaver/staging --no-same-owner'"
   remote "$sha" <<'REMOTE'

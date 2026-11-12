@@ -1,6 +1,6 @@
 /**
  * Detection scoring against ground_truth.csv: a JavaScript port of
- * vision/scripts/score-experiment.py with the same agreed rules (2026-10-03):
+ * the former vision/scripts/score-experiment.py with the same agreed rules (2026-10-03):
  * - ground-truth names are mapped to menu names (misspellings fixed;
  *   "Baked Potato" = Baked Sweet Potatoes)
  * - IMG_2696 / IMG_2704: any pizza counts; IMG_2705 (pasta, not on the menu)
@@ -27,7 +27,7 @@ const ANY_PIZZA = new Set(['IMG_2696', 'IMG_2704']);
 const NOT_SCORED = new Set(['IMG_2705']);
 const NO_WRONG = new Set(['IMG_2706']);
 
-/** The last experiment (experiments/experiment_summary.csv, Gemini descriptions): 36 correct, 0 missed, 3 wrong. */
+/** The last recorded experiment (Gemini descriptions): 36 correct, 0 missed, 3 wrong. */
 export const BASELINE = { recall: 1, precision: 36 / 39 };
 
 function canon(raw) {

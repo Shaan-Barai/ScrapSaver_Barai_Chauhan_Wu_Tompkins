@@ -1,6 +1,6 @@
 /**
- * Per-meal read models: the daily series, per-meal detail with a grounded
- * suggestion, and the portions benchmark — all in
+ * Per-meal read models: per-meal detail with a grounded suggestion and the
+ * portions benchmark — all in
  * **Pixels wasted** (contracts/measurement.md): integer counts of foreground
  * pixels in validated leftover-food masks, one union per capture.
  *
@@ -30,14 +30,6 @@ import type { AnalysisAttempt, Attendance, CaptureEvent, FoodMeasurement, Insigh
 
 const MEALS: MealLabel[] = ['breakfast', 'lunch', 'dinner'];
 
-export interface DailyPoint {
-  date: string;
-  /** Pixels wasted that day; null = no counted plates. */
-  pixelsWasted: number | null;
-  capturedDishes: number;
-  countedDishes: number;
-}
-
 export interface MealDetailResponse {
   serviceId: string;
   date: string;
@@ -50,18 +42,6 @@ export interface MealDetailResponse {
    */
   insight: Insight | null;
   portionBenchmark: PortionBenchmark;
-}
-
-function addDays(date: string, n: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function eachDay(start: string, end: string): string[] {
-  const out: string[] = [];
-  for (let d = start; d <= end; d = addDays(d, 1)) out.push(d);
-  return out;
 }
 
 export class DashboardService {
@@ -133,34 +113,6 @@ export class DashboardService {
 
   async serviceSummary(menu: MenuBundle, attendance?: Attendance | null): Promise<PixelServiceSummary> {
     return this.summarize(menu, await this.observations(menu), attendance ?? null);
-  }
-
-  async daily(hallId: string, start: string, end: string): Promise<DailyPoint[]> {
-    const services = (await this.repo.listServices(hallId)).filter(
-      (s) => s.serviceDate >= start && s.serviceDate <= end,
-    );
-    const byDate = new Map<string, DailyPoint>();
-    for (const service of services) {
-      const menu = await this.repo.getMenuByService(service.serviceId);
-      if (!menu) continue;
-      const obs = await this.observations(menu);
-      const summary = this.summarize(menu, obs, null);
-      const point = byDate.get(service.serviceDate) ?? {
-        date: service.serviceDate,
-        pixelsWasted: null,
-        capturedDishes: 0,
-        countedDishes: 0,
-      };
-      point.capturedDishes += summary.captureCount;
-      point.countedDishes += summary.countedCaptureCount;
-      if (summary.countedCaptureCount > 0) {
-        point.pixelsWasted = (point.pixelsWasted ?? 0) + summary.pixelsWasted;
-      }
-      byDate.set(service.serviceDate, point);
-    }
-    return eachDay(start, end).map(
-      (date) => byDate.get(date) ?? { date, pixelsWasted: null, capturedDishes: 0, countedDishes: 0 },
-    );
   }
 
   async portionBenchmark(menu: MenuBundle): Promise<PortionBenchmark> {

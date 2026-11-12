@@ -24,11 +24,9 @@ async function addPlate(s: Server, eventId: string, capturedAt: string, px: numb
 }
 
 async function snapshot(s: Server) {
-  const totals = await s.api('GET', `/api/dashboard/totals?hallId=${HALL}&today=2026-10-04`);
   const gallery = await s.api('GET', `/api/captures?${WINDOW}`);
   const impact = await s.api('GET', `/api/dashboard/impact?${WINDOW}`);
   return {
-    totals: totals.json,
     ids: gallery.json.map((c: { eventId: string }) => c.eventId).sort(),
     pixels: impact.json.totals.pixels as number,
   };
@@ -73,8 +71,6 @@ test('load / clear-data / restore leave real captures stored and restore the def
   const empty = await snapshot(s);
   assert.deepEqual(empty.ids, []);
   assert.equal(empty.pixels, 0);
-  assert.equal(empty.totals.month.captures, 0);
-  assert.equal((await s.api('GET', `/api/observations?hallId=${HALL}&serviceId=${SERVICE}`)).json.observations.length, 0);
 
   // Nothing real is deleted: the admin list still shows the old plates.
   const admin = await s.repo.listCaptureEvents({ hallId: HALL, includeHidden: true });

@@ -130,8 +130,6 @@ describe(`SpacetimeDB reducers and rows (throwaway database ${DB})`, { skip: una
       const rows = await sumScanRows(repo, { hallId: HALL, start: DATE, end: DATE });
       const impact = await s.api('GET', `/api/dashboard/impact?hallId=${HALL}&start=${DATE}&end=${DATE}`);
       assert.equal(impact.json.totals.pixels, rows.pixels);
-      const totals = await s.api('GET', `/api/dashboard/totals?hallId=${HALL}&today=${DATE}`);
-      assert.equal(totals.json.today.pixels, rows.pixels);
       // Recommendations are saved in SpacetimeDB with their inputs.
       const rec = await s.api('POST', '/api/recommendation/regenerate', { hallId: HALL, start: DATE, end: DATE });
       assert.equal(rec.status, 200);

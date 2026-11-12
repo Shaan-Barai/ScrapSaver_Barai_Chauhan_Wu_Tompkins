@@ -23,51 +23,14 @@ vision/
     area.ts         IT_4 calibrated area (area-calibrated-v1), pure
     gateway.ts      Gemini transport (live/mock, timeout, bounded retries, ApiError)
     dishMatch.ts    same-dish judgment for the capture bridge
-    prompt.ts       menu sanitizing + legacy classification prompt
-    validate.ts / measurement.ts / analyze.ts / leftovers.ts   legacy/research helpers
+    prompt.ts       menu text sanitizing for prompts
     image.ts        bytes / read-URL -> Gemini inline-data formatting
     contracts.ts    copy of consumed contracts/types.ts types
   sam/                      Python SAM 2.1 worker (:8790) + requirements.txt
-  scripts/                  live smoke + research scripts (real Gemini calls)
-  fixtures/responses.json   canned model responses (mock mode + tests)
   test/                     node --test suite (fixtures and fakes only, no live calls)
 ```
 
-## Legacy usage (`analyzeCapture`, Gemini area estimates; not the measurement path)
-
-```ts
-import { createGeminiGateway, analyzeCapture } from '@scrap/vision';
-
-const gateway = createGeminiGateway(); // reads env; mock mode if no key
-
-const { attempt, measurements } = await analyzeCapture(gateway, {
-  eventId: 'cap_01J9ABCD',
-  attemptId: 'att_01J9ABCE01',
-  image: { kind: 'bytes', bytes, mimeType: 'image/jpeg' },
-  // or: { kind: 'url', url: temporaryReadUrl } from Agent 5's storage adapter
-  geometry: { widthPx: 1024, heightPx: 1024, coordinateSpace: 'topdown-normalized-v1', plateDiameterPx: 900 },
-  menu: { menuId, menuVersion, items },     // MenuItem[] for this hall/date/service only
-  baselines,                                 // ReferencePortion[] from Agent 2
-  estimateMissingBaselines: false,           // opt-in Gemini baseline estimates
-});
-```
-
-- `attempt.status` is `'succeeded' | 'needs_review' | 'failed'`. Failures and
-  invalid model output are explicit (`attempt.error` is a contracts `ApiError`)
-  and produce **no** measurements — never silent zero waste.
-- Every measurement has `method: 'gemini_area_estimate'` and the `ai_estimate`
-  flag. Missing/invalid baseline ⇒ no percentage + `unavailableReason` +
-  `missing_baseline`. `rawWasteFraction` is preserved unclamped; above 1 it is
-  flagged `above_baseline` (display percent capped at 100) and the attempt is
-  marked `needs_review`. Baselines estimated by Gemini (either a
-  `ReferencePortion` with source `gemini_estimate` or an opt-in in-response
-  estimate) carry `gemini_estimated_baseline`.
-- Unknown/non-menu food becomes a measurement with `itemId: null` and
-  `unavailableReason: 'unknown_item'`; empty plates succeed with the
-  `empty_plate` flag and zero measurements (an empty plate does not prove which
-  items were served).
-
-### Reusable text generation (Agent 6)
+## Reusable text generation (analytics)
 
 ```ts
 const text = await gateway.generateText(prompt, {
@@ -100,25 +63,23 @@ options win over env.
 
 When `GEMINI_API_KEY` is unset (or a `mockTransport` is injected), the gateway
 never touches the network. The default mock returns a valid empty-plate
-classification and clearly labeled fixture text; tests inject responses from
-`fixtures/responses.json`. Mock output is never presented as a live result.
+classification and clearly labeled fixture text; tests inject their own
+responses. Mock output is never presented as a live result.
 
 ## Prompt versioning
 
 The measurement path stamps `LOCALIZE_PROMPT_VERSION` (currently
 `scrap-localize-v4`, `src/localize.ts`; `+closeup` for two passes) on every
 `AnalysisAttempt` together with the model id, the menu version, the SAM
-model/settings, and the counting rule (`target-dish-v1`). The legacy
-`analyzeCapture` uses `PROMPT_VERSION` (`scrap-classify-v1`, `src/prompt.ts`).
+model/settings, and the counting rule (`target-dish-v1`).
 Bump a version whenever its prompt text or response schema changes
 meaningfully, so stored results remain traceable.
 
 Untrusted-input handling: menu names/descriptions are sanitized (control
 characters/backticks stripped, length-capped) and embedded as fenced JSON data
 with an instruction that the block is data only; the response schema constrains
-`itemId` to the supplied menu IDs; and `validate.ts` re-checks everything
-(shape, allowed IDs, finite non-negative areas, duplicate assignment, total
-area vs. plate area) before any measurement is computed.
+`itemId` to the supplied menu IDs; and `validateLocalizeText` re-checks the
+answer (shape, allowed IDs, box bounds) before any mask is requested.
 
 ## Running tests
 
@@ -249,55 +210,10 @@ constants `NEIGHBOR_FOOD_EXCLUDED` / `TARGET_DISH_UNAVAILABLE`.
 - `calibration` is no longer produced (BIG-PLAN v2, V1); the `calibration`
   input option is accepted and ignored for compatibility.
 
-`analyzeCapture` (Gemini-guessed areas) and `assessLeftovers`
-(counts/percents) remain as legacy/research helpers, not the measurement path.
-
-## Countable vs uncountable leftovers (`assessLeftovers`)
-
-`assessLeftovers(gateway, { image, labels })` (`src/leftovers.ts`) follows the
-team spec: for each food, Gemini (1) classifies it with one of the supplied
-labels, (2) decides from that classification whether the leftovers are
-**countable** (separate pieces, e.g. fries) or **uncountable** (one portion
-eaten into, e.g. a burger), then (3) returns a **piece count** for countable
-food or the **percent of a whole serving remaining** for uncountable food.
-The schema orders the fields so the countable decision comes first; output
-mixing count and percent, unknown labels, non-integer counts, or percents
-outside 0–100 is rejected (`VISION_INVALID_RESPONSE`, retryable). The model
-receives only the image and the labels.
-
-Blind live check (`npm run eval:leftovers [runs]`): reads a local `images/`
-folder at the repo root (gitignored — evaluation photos are not committed),
-re-encodes each image without metadata, shuffles them under anonymous ids,
-and compares the answers with the file names afterwards.
-
-**2026-10-03, `gemini-3.8-flash`, 5 images × 3 runs:** label and
-countable/uncountable decision correct 15/15; answers stable across runs.
-
-| File (never sent) | Gemini (3 runs) |
-| --- | --- |
-| burger50 | uncountable, 80 / 80 / 78 % left |
-| burger60 | uncountable, 80 / 75 / 78 % left |
-| burger90 | uncountable, 88 / 88 / 85 % left |
-| fries10 | countable, 13 / 13 / 13 left |
-| fries20 | countable, 27 / 25 / 26 left |
-
-If the file-name numbers are % remaining and fry counts, burger90 is close
-but burger50/60 read ~20–30 points high and are not told apart; fries are
-overcounted by ~30%. By eye, fries10 shows about 13 fries, so the labels may
-be approximate. Not yet wired into the backend pipeline or dashboard.
-
 ## Live target-dish check (2026-10-04)
 
-`node --env-file=../.env scripts/target-dish-smoke.mjs <outDir> [images]`
-(needs `GEMINI_API_KEY` and the SAM worker). Defaults: `test2/IMG_2697` and
-`IMG_2701` (both have neighbouring plates in frame) normalized like capture
-(1024² center crop), the demo dinner menu with Gemini descriptions, two-pass
-localization. Prints the target dish, whether the clip applied, other-dish
-boxes/pixels, counted pixels per food and the Gemini calls used; writes
-`<name>_overlay.jpg` + `results.json`. `MAX_GEMINI_CALLS` (default 2 per
-image + 1) aborts a runaway run.
-
-Run on 2026-10-04 (`GEMINI_MODEL` from `.env`, SAM 2.1 Small on MPS, 2 Gemini
+A one-off live check (its script has since been removed) on `test2/IMG_2697` and `IMG_2701`
+(both have neighbouring plates in frame), run on 2026-10-04 (`GEMINI_MODEL` from `.env`, SAM 2.1 Small on MPS, 2 Gemini
 calls per photo):
 
 | Photo | Target dish | Other dish (not counted) | Counted (Pixels wasted) | vs ground_truth.csv |
@@ -315,37 +231,13 @@ of the dish box; `dish-region-v3` also unions the ellipse inscribed in the dish 
 edge-touching bowl (IMG_2695, D1) cannot clip food Gemini put on the target dish. These are phone photos with several dishes in frame, not
 images from the mounted camera.
 
-`scripts/waste-impact.mjs <imagesDir> <../factors/menu_waste_factors_EastQuad.csv> [outDir]`
-(research only) runs the same pipeline on a folder of photos and prints
-pixels and **relative impact points** (`points = px/1000 × weight_g_per_cm2 ×
-factor`; co2Points C, waterPoints W, impactPoints 0.19C + 1.50W;
-nutritionPoints separate). Points are unitless, not grams, kg CO2e, litres or
-dollars.
-
-## Live smoke test
-
-```sh
-npm run smoke    # builds, loads ../.env, makes real Gemini calls
-```
-
-`scripts/smoke.mjs` checks: live mode; `generateText`; a short tip at
-`maxOutputTokens: 220` finishes untruncated; `analyzeCapture` on a top-down
-plate (default `capture/fixtures/replay/images/dinner-1003-salmon-rice.jpg`)
-against the demo-seed menu and baselines; a bad key → `GEMINI_AUTH_FAILED`
-without retries. Optional args: `[image.jpg] [serviceId]`.
-
-**Last run: 2026-10-03, `gemini-3.8-flash`, all checks passed**
-(recorded in `contracts/decisions.md`). Inputs were AI-generated synthetic
-plates — this verifies the provider path, not measurement accuracy.
+## Live Gemini findings
 
 Live-run findings now handled in code: Google returns HTTP 400 for an invalid
 key (mapped to `GEMINI_AUTH_FAILED`); text requests disable thinking
 (`thinkingBudget: 0`) because thinking tokens count against
 `maxOutputTokens`; a `MAX_TOKENS` finish is rejected as
-`GEMINI_TRUNCATED_RESPONSE` rather than returning half an answer. An
-above-baseline item no longer turns the attempt into `needs_review`: the
-measurement carries `above_baseline` and aggregates exclude it, while the
-plate's other items still count.
+`GEMINI_TRUNCATED_RESPONSE` rather than returning half an answer.
 
 ## IT_4: camera calibration and calibrated area
 

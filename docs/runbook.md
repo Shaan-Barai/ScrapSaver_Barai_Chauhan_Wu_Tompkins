@@ -182,7 +182,7 @@ throwaway experiments, publish the module to a new local database name and delet
 | R2 PUT returns 403 `SignatureDoesNotMatch` | PUT headers | Send exactly the returned `uploadHeaders` and the declared byte count |
 | Analysis `failed` | ApiError code | Retry if `retryable` (rerun the bridge; same eventIds); otherwise needs_review |
 | Every capture fails with `GEMINI_BILLING` (HTTP 402), and the recommendation stays `fallback` | `details.providerStatus` 402 / "prepayment credits are depleted" | Gemini billing is empty: top up the project in AI Studio. Rerun the bridge afterwards; it retries under the same eventIds |
-| `GEMINI_AUTH_FAILED` | Key in `.env` | Fix `GEMINI_API_KEY`; `cd vision && npm run smoke` |
+| `GEMINI_AUTH_FAILED` | Key in `.env` | Fix `GEMINI_API_KEY`, then check `GET /api/ready` |
 | `GEMINI_MODEL_NOT_FOUND` | `GEMINI_MODEL` | Use a model the key can access |
 | Plate flagged `target_dish_unavailable` | Overlay, SAM worker log | Gemini/SAM could not find the scanned dish, so nothing was clipped: neighbouring food may be counted. Re-aim the camera so one plate is centered |
 | Plate flagged `neighbor_food_excluded` | Overlay (excluded food drawn separately) | Expected when a second plate is in frame: its food was dropped. It is counted when it is the centered plate in its own capture |

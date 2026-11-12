@@ -19,7 +19,7 @@
 import type { ImpactDashboard, ItemImpactRow, PhysicalMethod, Recommendation } from './contracts.js';
 import { hashString } from './attendance.js';
 import { formatCo2e, formatWaterLitres } from './physical.js';
-import type { TextGateway } from './suggestions.js';
+import type { TextGateway } from './gateway.js';
 import { WASTE_FACTORS_VERSION } from './wasteImpact.js';
 
 /** Prompt version without calibrated estimates (v4: 2-3 bullets that name their dish; trend fact). */

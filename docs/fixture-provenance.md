@@ -1,28 +1,6 @@
 # Fixture provenance
 
-Owner: Agent 8. Fixtures are **synthetic demo data** for verification. They are not measured dining-hall waste.
-
-## Sources
-
-| Asset | Origin |
-| --- | --- |
-| Entity shapes | [`contracts/types.ts`](../contracts/types.ts) |
-| Canonical single-record samples | [`contracts/samples.json`](../contracts/samples.json) (Agent 1) |
-| Scenario compositions | [`tests/fixtures/scenarios/`](../tests/fixtures/scenarios/) (Agent 8) |
-| Measurement formulas | AGENTS.md §7 |
-
-## Notable numbers
-
-| Value | Meaning |
-| --- | --- |
-| `expectedAreaPx = 48000` | Hand-chosen uneaten reference area for scrambled eggs in normalized 1024² space |
-| `remainingAreaPx = 14880` | Chosen so `14880/48000 = 0.31` exactly for a clean demo percent |
-| Attendance `742` | Arbitrary value inside 300–1,200 with seed `demo-seed-1` |
-| Hall `hall-main` / TZ `America/Detroit` | Provisional MHacks defaults from decisions.md |
-
-## Modes
-
-Every scenario sets `"mode": "fixture"` today. Live-provider fixtures will be added only when credentials/hardware exist, and will be labeled `live_gemini` / `live_camera` separately.
+Fixtures are **synthetic demo data** for verification. They are not measured dining-hall waste.
 
 ## Calibration fixture (IT_4, synthetic)
 
@@ -47,9 +25,9 @@ Every scenario sets `"mode": "fixture"` today. Live-provider fixtures will be ad
   `tests/integration/calibrate-capture.test.mjs` (fake backend) and `tests/e2e/calibration-live.test.mjs`
   (on the test hall `hall-e2e-cal`).
 
-## Image bytes
+## Replay images
 
-Scenario JSON contains **metadata only**. Demo replay images live in
+Demo replay images live in
 [`capture/fixtures/replay/images/`](../capture/fixtures/replay/) — six
 AI-generated (`gemini-3.1-flash-image`, 2026-10-03) synthetic top-down plates
 of demo-seed menu items, no people or real halls. They are uploaded to object

@@ -668,3 +668,28 @@ only (`frontend/src/components/DateRangePicker.tsx`); no API change.
   (as `vision` already did), so a deleted source can't survive as a stale `.js` that tests still
   run. The backend no longer builds `capture/` (only the removed camera endpoint needed it).
 - **`archive/preview-app/` removed** (superseded, not used at runtime; see the 2026-10-04 entry).
+
+## 2026-11-11: second simplification pass (dead code paths and duplicate tools)
+
+- **Endpoints nothing calls are gone:** `GET /api/dashboard/summary` (the old baseline-percentage
+  summary, `SummaryService`), `GET /api/dashboard/daily` (the dashboard uses
+  `/api/dashboard/impact/daily`), `GET /api/dashboard/totals`, `GET /api/observations`,
+  `GET|PUT /api/attendance`, `GET|POST /api/suggestions`, `POST /api/menus/csv`. Simulated attendance
+  and meal insights are still generated and stored by `/api/dashboard/meal`.
+- **Old analysis generations removed.** `vision/`: `analyzeCapture` (Gemini-guessed areas),
+  `assessLeftovers`, the classification-only prompt/validator, their tests and the research/eval
+  scripts (`vision/scripts/`). `analytics/`: the baseline-percentage `aggregates`, `eligibility` and
+  `suggestions` modules (`TextGateway` and `sanitizeModelText` moved to `analytics/src/gateway.ts`).
+  The measurement path (`analyzeCaptureWithMasks`) and every dashboard number are unchanged.
+- **The standalone upload website (`upload_demo/`) is removed:** the dashboard's Try an Image does the
+  same thing. Its pipeline moved to `backend/scripts/try-image-pipeline.mjs` (still used by Try an
+  Image and `backend/scripts/make-demo-pictures.mjs`), and `demo.py`'s `try_image` step now runs the
+  sample bowl through `/api/try-image` (the old `upload_site` step is gone).
+- **`experiments/` removed** (one-off outputs; still in git history), with the always-skipped
+  `tests/system/scoring.test.mjs`. The `tests/integration` fixture suites
+  (`aggregate-and-exclusions`, `contract-fixtures`, `idempotency-storage-labels`) and
+  `tests/fixtures/` are removed: they checked JSON fixtures against helper code inside `tests/`,
+  not the product.
+- CI runs on Node 22 (the offsite server's version; Node 20 is end-of-life).
+- Kept on purpose: reference portions/baselines (still threaded through ingestion, the mask
+  pipeline and the SpacetimeDB schema; revisit with the database move) and `db/spacetimedb`.

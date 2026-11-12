@@ -8,7 +8,6 @@
  *   SAM 2.1 masks -> target-dish clip -> counted Pixels wasted (rule
  *   target-dish-v1), plus the segmented overlay JPEG. Pixels only: no plate
  *   calibration (BIG-PLAN v2).
- * - analyzeCapture: legacy Gemini area estimates (not the measurement path).
  */
 
 export {
@@ -30,8 +29,6 @@ export type {
   GatewayRequest,
   MockTransport,
 } from './gateway.js';
-
-export { analyzeCapture } from './analyze.js';
 
 export { analyzeCaptureWithMasks } from './maskPipeline.js';
 export type { MaskAnalysisInput, MaskAnalysisResult, MaskAnalysisDiagnostics, LocalizationStats } from './maskPipeline.js';
@@ -94,47 +91,19 @@ export { LOCALIZE_PROMPT_VERSION, LOCALIZE_SYSTEM_INSTRUCTION, TARGET_DISH_LINE,
 export type { LocalizedDish, LocalizedRegion, LocalizeOutcome } from './localize.js';
 
 export {
-  assessLeftovers,
-  buildLeftoverSchema,
-  validateLeftoverText,
-  LEFTOVER_PROMPT_VERSION,
-} from './leftovers.js';
-export type { AssessLeftoversInput, AssessLeftoversResult, LeftoverAssessment } from './leftovers.js';
-
-export {
   judgeSameDish,
   buildDishMatchSchema,
   validateDishMatchText,
   DISH_MATCH_PROMPT_VERSION,
 } from './dishMatch.js';
 export type { DishMatchVerdict, JudgeSameDishInput, JudgeSameDishResult, SameDishVerdict } from './dishMatch.js';
-export type { AnalyzeCaptureInput, AnalyzeCaptureResult } from './analyze.js';
 
 export { GatewayError, makeApiError, normalizeProviderError } from './errors.js';
-
-export {
-  clamp,
-  computeMeasurement,
-  computeUnknownMeasurement,
-  baselineFromReference,
-  MEASUREMENT_METHOD,
-} from './measurement.js';
-export type { BaselineInput, MeasurementIdentity } from './measurement.js';
 
 export { imageInputToPart } from './image.js';
 export type { ImageInput } from './image.js';
 
-export {
-  PROMPT_VERSION,
-  CLASSIFICATION_SYSTEM_INSTRUCTION,
-  buildClassificationPrompt,
-  buildResponseSchema,
-  sanitizeMenuText,
-  sanitizeMenuItems,
-} from './prompt.js';
-
-export { validateClassificationText, maxPlausibleAreaPx } from './validate.js';
-export type { ClassificationResult, ClassifiedItem, UnknownFood, ValidationOutcome } from './validate.js';
+export { sanitizeMenuText, sanitizeMenuItems } from './prompt.js';
 
 export type * from './contracts.js';
 export { NEIGHBOR_FOOD_EXCLUDED, TARGET_DISH_UNAVAILABLE } from './contracts.js';

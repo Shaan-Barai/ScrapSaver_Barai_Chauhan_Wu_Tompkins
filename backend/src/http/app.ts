@@ -9,14 +9,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { parseMenuCsv, parseMenuUpload, planMenuRevision, parsePortionsServed, parsePortionsCsv } from 'scrap-data';
+import { parseMenuUpload, planMenuRevision, parsePortionsServed, parsePortionsCsv } from 'scrap-data';
 import { HttpError, notFound, badRequest, toHttpError, apiError } from '../errors.js';
 import type { BackendConfig } from '../config.js';
 import type { Repository } from '../repo/repository.js';
 import type { ObjectStorageAdapter } from '../storage/objectStorage.js';
 import type { ImageService } from '../services/imageService.js';
 import type { IngestionService } from '../services/ingestionService.js';
-import type { SummaryService } from '../services/summaryService.js';
 import type { DashboardService } from '../services/dashboardService.js';
 import type { DishMatchService } from '../services/dishMatchService.js';
 import { DEMO_TIME_ZONE, type DemoService } from '../services/demoService.js';
@@ -44,9 +43,7 @@ import {
   type ResolvedSecurity,
 } from './security.js';
 import {
-  validateAttendance,
   validateCaptureSubmission,
-  validateInsight,
   validateMenuBundle,
   validateReferencePortion,
 } from '../services/validation.js';
@@ -96,7 +93,6 @@ export interface AppDeps {
   storage: ObjectStorageAdapter;
   images: ImageService;
   ingestion: IngestionService;
-  summary: SummaryService;
   dashboard: DashboardService;
   dishMatch: DishMatchService;
   captures: CaptureService;
@@ -117,7 +113,7 @@ export interface AppDeps {
 }
 
 export function createApp(deps: AppDeps): express.Express {
-  const { config, repo, storage, images, ingestion, summary, dashboard, dishMatch, captures, impact, security, readiness, calibration } = deps;
+  const { config, repo, storage, images, ingestion, dashboard, dishMatch, captures, impact, security, readiness, calibration } = deps;
   const now = deps.now ?? (() => Date.now());
   const app = express();
   app.disable('x-powered-by');
@@ -284,19 +280,6 @@ export function createApp(deps: AppDeps): express.Express {
     '/api/menus/upload',
     wrap(async (req, res) => {
       res.status(201).json({ results: await saveParsedMenus(parseMenuUpload(req.body)) });
-    }),
-  );
-
-  app.post(
-    '/api/menus/csv',
-    express.text({ type: ['text/csv', 'text/plain'], limit: '1mb' }),
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      const hallTimezone = requireQuery(req, 'hallTimezone');
-      if (typeof req.body !== 'string') {
-        throw badRequest('INVALID_CSV', 'Send the CSV file as text/csv.');
-      }
-      res.status(201).json({ results: await saveParsedMenus(parseMenuCsv(req.body, { hallId, hallTimezone })) });
     }),
   );
 
@@ -746,76 +729,6 @@ export function createApp(deps: AppDeps): express.Express {
     }),
   );
 
-  // ---- observations / measurements ----
-  app.get(
-    '/api/observations',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      const serviceId = requireQuery(req, 'serviceId');
-      const events = await repo.listCaptureEvents({ hallId, serviceId });
-      const observations = [];
-      for (const event of events) {
-        observations.push({
-          event,
-          measurements: await ingestion.countedMeasurements(event),
-        });
-      }
-      res.json({ observations });
-    }),
-  );
-
-  // ---- attendance ----
-  app.get(
-    '/api/attendance',
-    wrap(async (req, res) => {
-      const serviceId = requireQuery(req, 'serviceId');
-      const attendance = await repo.getAttendance(serviceId);
-      if (!attendance) {
-        throw notFound(
-          'ATTENDANCE_NOT_FOUND',
-          'No simulated attendance is stored for this service yet.',
-          { serviceId },
-        );
-      }
-      res.json({ attendance });
-    }),
-  );
-
-  // Write path for Agent 6's generator (one stable value per service).
-  app.put(
-    '/api/attendance',
-    wrap(async (req, res) => {
-      const attendance = validateAttendance(req.body);
-      const existing = await repo.getAttendance(attendance.serviceId);
-      if (existing) {
-        // Never regenerate per request (AGENTS.md 6.3): first write wins.
-        res.json({ attendance: existing, created: false });
-        return;
-      }
-      await repo.upsertAttendance(attendance);
-      res.status(201).json({ attendance, created: true });
-    }),
-  );
-
-  // ---- dashboard summary (§7) ----
-  app.get(
-    '/api/dashboard/summary',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      const serviceId = requireQuery(req, 'serviceId');
-      res.json(await summary.getSummary(hallId, serviceId));
-    }),
-  );
-
-  // ---- dashboard read models for the UI (formulas from analytics/) ----
-  app.get(
-    '/api/dashboard/daily',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      res.json({ days: await dashboard.daily(hallId, requireQuery(req, 'start'), requireQuery(req, 'end')) });
-    }),
-  );
-
   app.get(
     '/api/dashboard/meal',
     wrap(async (req, res) => {
@@ -895,55 +808,12 @@ export function createApp(deps: AppDeps): express.Express {
     }),
   );
 
-  // Headline totals: today, this week (Mon-today), this month (1st-today), in pixels.
-  app.get(
-    '/api/dashboard/totals',
-    wrap(async (req, res) => {
-      const hallId = typeof req.query.hallId === 'string' && req.query.hallId ? req.query.hallId : undefined;
-      res.json(await impact.totals(hallId, requireQuery(req, 'today')));
-    }),
-  );
-
   // Regenerate on demand (dashboard button): always asks Gemini again and saves the result.
   app.post(
     '/api/recommendation/regenerate',
     geminiCap,
     wrap(async (req, res) => {
       res.json(await impact.recommendation(parseWindow(req.body ?? {}), { regenerate: true }));
-    }),
-  );
-
-  // ---- suggestions (stored Insights; generation is Agent 6's) ----
-  app.get(
-    '/api/suggestions',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      const insights = await repo.listInsights(hallId);
-      if (insights.length === 0) {
-        // Generation belongs to Agent 6 (6.4/6.5); until an Insight is
-        // stored, suggestions are explicitly unavailable — never invented.
-        throw new HttpError(
-          404,
-          apiError(
-            'SUGGESTIONS_UNAVAILABLE',
-            'No suggestions have been generated for this hall yet. They appear after the suggestion service runs.',
-            true,
-            { hallId },
-          ),
-        );
-      }
-      insights.sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
-      res.json({ insights });
-    }),
-  );
-
-  // Write path for Agent 6's suggestion service.
-  app.post(
-    '/api/suggestions',
-    wrap(async (req, res) => {
-      const insight = validateInsight(req.body);
-      await repo.upsertInsight(insight);
-      res.status(201).json({ insight });
     }),
   );
 

@@ -44,7 +44,7 @@ edited in Settings; there is no first-run wizard.
   - `GET /api/recommendation?hallId&start&end` -> `Recommendation`
   - `GET /api/captures?hallId&start&end` -> `CaptureListItem[]` (bare array or `{ captures }`)
   - `GET /api/captures/:eventId/images` -> `CaptureImages` (short-lived links)
-  - `GET /api/dashboard/daily` for the chart (Pixels wasted per day)
+  - `GET /api/dashboard/impact/daily?hallId&start&end` for the chart (per-day pixels, CO2)
   All totals, relative points and rankings are computed server-side by
   `analytics/`; components only format them.
 - **`src/data/mockApi.ts` + `mockData.ts`**: deterministic demo data (seeded

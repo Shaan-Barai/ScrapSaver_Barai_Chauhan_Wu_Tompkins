@@ -114,29 +114,7 @@ export {
 export { summarizePortionBenchmarks, portionDataVersion, validMaskCount, type PortionBenchmark, type PortionBenchmarkItem } from './portions.js';
 export { generatePortionInsight } from './portionSuggestions.js';
 export { readableItemName } from './names.js';
-
-export {
-  classifyMeasurement,
-  classifyCapture,
-  geometryCompatible,
-  emptyExclusionCounts,
-  isFiniteNonNegative,
-  isFinitePositive,
-  AGGREGATE_COORDINATE_SPACE,
-  type ExclusionReason,
-  type EligibilityResult,
-} from './eligibility.js';
-
-export {
-  summarizeService,
-  buildWasteTrend,
-  computeDataVersion,
-  METRIC_LABELS,
-  type AggregateInput,
-  type ServiceSummary,
-  type ItemWasteComparison,
-  type WasteTrendPoint,
-} from './aggregates.js';
+export { sanitizeModelText, type TextGateway } from './gateway.js';
 
 export {
   generateAttendance,
@@ -150,18 +128,6 @@ export {
   DEFAULT_ATTENDANCE_MAX,
   type AttendanceConfig,
 } from './attendance.js';
-
-export {
-  generateInsight,
-  buildInsightMetrics,
-  buildSuggestionPrompt,
-  buildFallbackRecommendation,
-  InsightCache,
-  SUGGESTION_PROMPT_VERSION,
-  type TextGateway,
-  type SuggestionRequest,
-  type SuggestionOptions,
-} from './suggestions.js';
 
 export {
   summarizePixels,

@@ -897,55 +897,6 @@ def step_admin(demo):
         webbrowser.open(url)
 
 
-def step_upload_site(demo):
-    """Upload website: one button → results page with original, Gemini classification, SAM masks, total wasted (upload_demo/)."""
-    port = int(os.environ.get("UPLOAD_DEMO_PORT", "8795"))
-    url = f"http://localhost:{port}"
-    up = http_ok(url + "/api/foods")[0]
-    if not up and not demo.args.no_start and ask("The upload website is not running. Start it now?"):
-        log = demo.run / "logs" / "upload-site.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
-        process = subprocess.Popen(["node", "upload_demo/server.mjs"], cwd=REPO, stdout=open(log, "w"),
-                                   stderr=subprocess.STDOUT, start_new_session=True)
-        demo.started.append(("Upload website", process.pid, log))
-        print(dim(f"    started upload website (pid {process.pid}), log {show_path(log)}"))
-        deadline = time.time() + 20
-        while time.time() < deadline and not up:
-            time.sleep(0.5)
-            up = http_ok(url + "/api/foods")[0]
-    if not up:
-        demo.check("FAIL", f"Upload website not reachable at {url}  (start: node upload_demo/server.mjs)")
-        return
-    demo.check("PASS", f"Upload website at {url}")
-    print(f"  Running the sample halal chicken + rice bowl through the website's API (2 Gemini calls)...")
-    sample = urllib.request.urlopen(url + "/sample.jpg", timeout=10).read()
-    req = urllib.request.Request(url + "/api/analyze", data=sample, method="POST",
-                                 headers={"content-type": "image/jpeg"})
-    try:
-        with urllib.request.urlopen(req, timeout=180) as r:
-            result = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        demo.check("FAIL", f"Upload analysis HTTP {e.code}: {e.read()[:200].decode(errors='replace')}")
-        return
-    s = result["summary"]
-    rows = [[f["food"], num(f["pixelsWasted"]), num((f["factors"] or {}).get("co2KgPerKg"), 2),
-             num((f["points"] or {}).get("co2Points"), 1), num((f["points"] or {}).get("waterPoints"), 1)] for f in s["foods"]]
-    table(rows, ["Food", "Pixels wasted", "kg CO2e/kg", "CO2 pts", "Water pts"], "lrrrr")
-    out = demo.run / "upload-site"
-    out.mkdir(parents=True, exist_ok=True)
-    for key, name in [("original", "1_original"), ("boxes", "2_gemini_boxes"), ("masks", "3_sam_segmentation"), ("final", "4_final_result")]:
-        if result["images"].get(key):
-            (out / f"{name}.jpg").write_bytes(base64.b64decode(result["images"][key].split(",", 1)[1]))
-    print(dim(f"  Step pictures: {show_path(out)}/  (halal bowl reference set: demo_pictures/)"))
-    found = {f["food"] for f in s["foods"]}
-    ok = s["countStatus"] == "complete" and {"Halal Chicken", "Halal Rice"} <= found
-    demo.check("PASS" if ok else "WARN", f"Sample bowl: {num(s['capturePixelsWasted'])} px, {s['countStatus']}, "
-               f"found {', '.join(sorted(found)) or 'nothing'} (matched against the full food database) in {s['seconds']} s")
-    print(f"  Results page: {url}/results/{result['id']}")
-    if not demo.args.no_open:
-        webbrowser.open(f"{url}/results/{result['id']}")
-
-
 def step_deploy(demo):
     """The production URL (SCRAP_PROD_URL) answers: health, readiness, dashboard over HTTPS; read-only if offsite."""
     url = (demo.args.prod_url or "").rstrip("/")
@@ -1011,10 +962,49 @@ def step_try_image(demo):
         demo.check("WARN", f"Try an Image is unavailable: {body.get('reason')}")
     ok, sample = http_ok(demo.api + "/api/try-image/sample.jpg")
     demo.check("PASS" if ok and sample[:2] == b"\xff\xd8" else "FAIL", "Sample photo served at /api/try-image/sample.jpg")
+    if body.get("available") and ok:
+        try_sample(demo, sample)
     url = demo.args.dashboard_url.rstrip("/") + "/behind-the-scenes/try-an-image"
     print(f"  Open {url}  (Upload a photo, or Use the sample photo)")
     if not demo.args.no_open:
         webbrowser.open(url)
+
+
+def try_sample(demo, sample):
+    """Run the sample halal chicken + rice bowl through Try an Image (2 Gemini calls) and save its step pictures."""
+    print("  Running the sample halal chicken + rice bowl through Try an Image (2 Gemini calls)...")
+    req = urllib.request.Request(demo.api + "/api/try-image", data=sample, method="POST",
+                                 headers={"content-type": "image/jpeg", "user-agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=ssl_context()) as r:
+            job = json.loads(r.read())
+    except (urllib.error.URLError, OSError) as e:
+        demo.check("FAIL", f"POST /api/try-image: {getattr(e, 'code', e)}")
+        return
+    deadline = time.time() + 240
+    while job.get("status") not in ("done", "failed") and time.time() < deadline:
+        time.sleep(2)
+        status, job = demo.get(f"/api/try-image/{job['id']}", timeout=10, anonymous=True)
+        if status != 200 or not isinstance(job, dict):
+            demo.check("FAIL", f"GET /api/try-image/<id>: HTTP {status}")
+            return
+    if job.get("status") != "done":
+        demo.check("FAIL", f"Try an Image sample: {job.get('status')} {(job.get('error') or {}).get('message', '')}")
+        return
+    s = job["summary"]
+    rows = [[f["food"], num(f["pixelsWasted"]), num((f["points"] or {}).get("co2Points"), 1),
+             num((f["points"] or {}).get("waterPoints"), 1)] for f in s["foods"]]
+    table(rows, ["Food", "Pixels wasted", "CO2 pts", "Water pts"], "lrrr")
+    out = demo.run / "try-image"
+    out.mkdir(parents=True, exist_ok=True)
+    for key, name in [("original", "1_original"), ("boxes", "2_gemini_boxes"), ("masks", "3_sam_segmentation"), ("final", "4_final_result")]:
+        if (job.get("images") or {}).get(key):
+            (out / f"{name}.jpg").write_bytes(base64.b64decode(job["images"][key].split(",", 1)[1]))
+    print(dim(f"  Step pictures: {show_path(out)}/  (halal bowl reference set: demo_pictures/)"))
+    found = {f["food"] for f in s["foods"]}
+    ok = s["countStatus"] == "complete" and {"Halal Chicken", "Halal Rice"} <= found
+    demo.check("PASS" if ok else "WARN", f"Sample bowl: {num(s['capturePixelsWasted'])} px, {s['countStatus']}, "
+               f"found {', '.join(sorted(found)) or 'nothing'} (matched against the full food database) in {s['seconds']} s")
 
 
 def step_demo_data(demo):
@@ -1053,7 +1043,6 @@ STEPS = [
     ("recommendation", "AI recommendation", step_recommendation),
     ("dashboard", "Dashboard", step_dashboard),
     ("admin", "Admin: choose which plates are shown", step_admin),
-    ("upload_site", "Upload website: photo → results page", step_upload_site),
     ("try_image", "Try an Image (dashboard → Behind the scenes)", step_try_image),
     ("demo_data", "Demo data (copies of real plates, load / clear / restore)", step_demo_data),
     ("deploy", "Production URL", step_deploy),

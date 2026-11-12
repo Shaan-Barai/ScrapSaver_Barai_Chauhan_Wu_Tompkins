@@ -71,11 +71,10 @@ python3 demo.py --list           # the steps; --only/--skip pick some, --events 
 python3 demo.py --simulate --hall hall-test   # run on a test hall instead of hall-main
 ```
 
-**Upload website:** `node upload_demo/server.mjs` → http://localhost:8795. One "Upload a photo"
-button; after the upload, a results page shows the original, Gemini's classification, SAM 2.1's masks,
-the final result and the total food wasted (matched against every food in the food database;
-[`upload_demo/README.md`](upload_demo/README.md)).
-[`demo_pictures/`](demo_pictures/README.md) shows every step for the halal chicken + rice bowl.
+**Try an Image** (dashboard → Behind the scenes): upload any plate photo and see the original,
+Gemini's classification, SAM 2.1's masks, the final result and the total food wasted (matched against
+every food in the food database; nothing is stored). [`demo_pictures/`](demo_pictures/README.md) shows
+every step for the halal chicken + rice bowl.
 
 It needs the stack from [Setup](#setup) (it offers to start missing services) and writes its
 photos and logs to `images/demo-runs/` (gitignored). **Adding a feature? Add a demo step**
@@ -115,8 +114,7 @@ photos and logs to `images/demo-runs/` (gitignored). **Adding a feature? Add a d
 | `factors/` | Agents 2+6 | Per-food waste/nutrition factor CSVs (East Quad, Halal Bros, 500 common foods), menu labels, and the formula README; `data/` generates its tables from them |
 | `docs/plans/` | Agent 1 | Planning/spec docs and trackers (BIG-PLAN, IT_4, DEBUG-PLAN, UI, AI, MVP_AI) |
 | `deploy/` | — | Local production stack, smoke test, Cloudflare Tunnel; `deploy/server/` for the read-only offsite server |
-| `experiments/` | — | One-off segmentation/menu experiment outputs and `test_sam.py` (not used at runtime) |
-| `test2/`, `demo_pictures/`, `upload_demo/` | — | Demo plate photos, pipeline pictures, upload demo site (used by `demo.py`) |
+| `test2/`, `demo_pictures/` | — | Demo plate photos and pipeline pictures (used by `demo.py` and Try an Image) |
 
 Root files: `demo.py` (one-command demo) and `test-all.sh` (every test).
 `images/` holds local, gitignored photos and demo-run logs.
@@ -196,9 +194,8 @@ Demo copies (real plates repeated over the last 8 weeks, badged "Demo data only"
 Individual suites:
 
 ```bash
-cd tests && npm test                          # fixture + formula checks
+cd tests && npm test                          # offline cross-system checks
 (cd <module> && npm test)                     # data capture vision analytics backend frontend
-cd vision && npm run smoke                    # live Gemini smoke test (uses .env key)
 cd tests && SCRAP_E2E=1 npm run test:e2e      # live API flow against the running stack
 cd tests && SCRAP_E2E=1 npm run test:e2e:scrap   # camera sim → R2 → scrap → Gemini+SAM → dashboard API
 python3 capture/scripts/live_camera_test.py --target arduino@<board-ip> --identity ~/.ssh/scrap_unoq --service svc_hall-main_<date>_dinner --spacetime-db scrap   # real Uno Q
@@ -214,8 +211,7 @@ python3 capture/scripts/live_camera_test.py --target arduino@<board-ip> --identi
 | `GET /api/captures?start&end&hallId[&limit]` | recent plates with state and pixels per food |
 | `GET /api/captures/:eventId/images` | short-lived URLs for the original photo, segmented overlay, and per-food masks |
 | `GET /api/recommendation?start&end&hallId` | AI recommendation (`gemini`) or labeled rule-based `fallback`, with cited metrics |
-| `GET /api/dashboard/daily` | per-day Pixels wasted |
-| `GET /api/dashboard/totals?today&hallId` | Pixels wasted today, this week (Mon-today), this month (1st-today) |
+| `GET /api/dashboard/impact/daily?start&end&hallId` | per-day Pixels wasted, CO2 points, estimated kg CO2e |
 | `POST /api/captures/:eventId/reanalyze` | re-runs Gemini + SAM on a stored real plate (same eventId, the service's current menu); counted only if it succeeds. Script: `backend/scripts/reanalyze.mjs` |
 | `POST /api/recommendation/regenerate` | asks Gemini again for `{start,end,hallId}`; every recommendation is saved (insight table) with its inputs |
 | `POST /api/demo/seed`, `POST /api/demo/clear` | labeled sample history (DEMO_SEED=1) and removing it |

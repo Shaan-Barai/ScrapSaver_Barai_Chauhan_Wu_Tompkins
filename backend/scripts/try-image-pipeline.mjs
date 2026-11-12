@@ -9,7 +9,8 @@
  *
  * The measurement itself is vision's analyzeCaptureWithMasks (AGENTS.md §7);
  * this file only adds the food database and the step pictures. Shared by
- * make-demo-pictures.mjs (demo_pictures/) and server.mjs (upload website).
+ * make-demo-pictures.mjs (demo_pictures/) and the backend's Try an Image
+ * (backend/src/services/tryImageService.ts).
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const REPO = fileURLToPath(new URL('../', import.meta.url));
+export const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const vision = await import(path.join(REPO, 'vision/dist/src/index.js'));
 const sharp = createRequire(path.join(REPO, 'vision/package.json'))('sharp');
 

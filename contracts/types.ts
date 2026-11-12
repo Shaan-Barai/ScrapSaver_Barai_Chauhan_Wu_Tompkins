@@ -711,7 +711,7 @@ export interface TryImageFoodRow {
   factors: Record<string, unknown> | null;
 }
 
-/** upload_demo/pipeline.mjs runSteps().summary, as-is. */
+/** backend/scripts/try-image-pipeline.mjs runSteps().summary, as-is. */
 export interface TryImageSummary {
   status: string;
   countStatus: 'complete' | 'partial' | 'unavailable' | string;

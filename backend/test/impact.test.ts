@@ -2,7 +2,7 @@
  * Waste-impact endpoints (BIG-PLAN v2: pixels + relative impact points, no
  * plate calibration, no grams) over hand-calculated fixtures:
  * GET /api/dashboard/impact, GET /api/captures, GET /api/recommendation,
- * GET /api/dashboard/daily. Offline: mock analyzer, local-dev storage,
+ * GET /api/dashboard/impact/daily. Offline: mock analyzer, local-dev storage,
  * in-memory repo, no live Gemini.
  *
  * Factor rows (menu_waste_factors_EastQuad.csv via scrap-data):
@@ -295,19 +295,6 @@ test('GET /api/recommendation: valid Gemini answer is served as source gemini an
   assert.equal(calls.n, 1, 'one Gemini call for identical statistics');
 });
 
-test('GET /api/dashboard/daily: pixels per day, no grams; null (never 0) without counted plates', async (t) => {
-  const s = await seeded();
-  t.after(() => s.close());
-  const res = await s.api('GET', `/api/dashboard/daily?hallId=${HALL}&start=2026-10-01&end=2026-10-02`);
-  assert.equal(res.status, 200, JSON.stringify(res.json));
-  const [before, day] = res.json.days;
-  assert.deepEqual(before, { date: '2026-10-01', pixelsWasted: null, capturedDishes: 0, countedDishes: 0 });
-  assert.equal(day.pixelsWasted, 20000);
-  assert.equal(day.capturedDishes, 3);
-  assert.equal(day.countedDishes, 2);
-  assert.equal('grams' in day, false);
-});
-
 test('GET /api/dashboard/impact/daily: per-day pixels and CO2 points; kgCo2e null (never 0) without a calibrated plate', async (t) => {
   const s = await seeded();
   t.after(() => s.close());
@@ -350,8 +337,8 @@ test('impact totals, capture list, daily: missing points stay null, clean plates
   await capture(s, 'cap_failed', `${DATE}T21:00:00.000Z`);
   const failed = await s.api('GET', `/api/dashboard/impact?start=${DATE}&end=${DATE}`);
   assert.equal(failed.json.totals.impactPoints, null, 'a failed capture is not zero waste');
-  const failedDay = await s.api('GET', `/api/dashboard/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
-  assert.equal(failedDay.json.days[0].pixelsWasted, null);
+  const failedDay = await s.api('GET', `/api/dashboard/impact/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
+  assert.equal(failedDay.json.days[0].pixels, null);
 
   s.fixtures.cap_clean = { measurements: [] };
   await capture(s, 'cap_clean', `${DATE}T21:30:00.000Z`);
@@ -362,8 +349,8 @@ test('impact totals, capture list, daily: missing points stay null, clean plates
   const list = await s.api('GET', `/api/captures?start=${DATE}&end=${DATE}`);
   const cleanItem = list.json.find((c: any) => c.eventId === 'cap_clean');
   assert.equal(cleanItem.pixelsWasted, 0);
-  const cleanDay = await s.api('GET', `/api/dashboard/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
-  assert.equal(cleanDay.json.days[0].pixelsWasted, 0);
+  const cleanDay = await s.api('GET', `/api/dashboard/impact/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
+  assert.equal(cleanDay.json.days[0].pixels, 0);
 });
 
 test('recommendations are saved with their inputs; regenerate asks again; Gemini failure shows the last saved one', async (t) => {

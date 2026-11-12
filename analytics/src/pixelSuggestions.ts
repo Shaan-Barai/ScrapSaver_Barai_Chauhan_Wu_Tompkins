@@ -7,7 +7,7 @@
 
 import type { Insight, MenuItem } from './contracts.js';
 import { computePixelDataVersion, type PixelServiceSummary } from './pixels.js';
-import { sanitizeModelText, type TextGateway } from './suggestions.js';
+import { sanitizeModelText, type TextGateway } from './gateway.js';
 
 export const PIXEL_SUGGESTION_PROMPT_VERSION = 'suggest-pixels-v1';
 

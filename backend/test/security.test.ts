@@ -98,10 +98,7 @@ test('reads are public; every mutation needs the bearer token or an admin sessio
   const cookie = setCookie.split(';')[0]!;
 
   assert.deepEqual((await raw(s.baseUrl, 'GET', '/api/auth/me', { cookie })).json, { admin: true, authRequired: true, readOnly: false });
-  const asAdmin = await raw(s.baseUrl, 'PUT', '/api/attendance', { cookie }, {
-    hallId: HALL, serviceId: MENU.service.serviceId, serviceDate: '2026-10-03', count: 500,
-    source: 'simulated', configuredMin: 300, configuredMax: 1200, generatorVersion: 'g1',
-  });
+  const asAdmin = await raw(s.baseUrl, 'POST', '/api/menus', { cookie }, MENU);
   assert.equal(asAdmin.status, 201);
 
   // Cross-site Origin with a cookie is refused.

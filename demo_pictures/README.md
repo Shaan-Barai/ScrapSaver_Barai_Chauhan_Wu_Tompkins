@@ -38,7 +38,7 @@ foil between rice grains. Counting is exact, but the mask is an AI estimate.
 ## Regenerate
 
 ```bash
-node upload_demo/make-demo-pictures.mjs [photo]   # needs GEMINI_API_KEY (.env) + SAM worker on :8790
+node backend/scripts/make-demo-pictures.mjs [photo]   # needs GEMINI_API_KEY (.env) + SAM worker on :8790
 ```
 
 This is a live run (2 Gemini calls), so box counts and pixels vary slightly between runs.

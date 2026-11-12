@@ -121,10 +121,8 @@ describe('simulated device: every test2/ photo through the real ingest function'
       const expected = 0.19 * r.impact.co2Points + 1.5 * r.impact.waterPoints;
       assert.ok(Math.abs(r.impact.impactPoints - expected) <= Math.max(0.02, expected * 0.002), `${r.displayName}: ${r.impact.impactPoints} vs ${expected}`);
     }
-    const totals = await ctx.s.api('GET', `/api/dashboard/totals?hallId=${HALL}&today=${DATE}`);
-    assert.equal(totals.json.today.pixels, rows.pixels);
-    const daily = await ctx.s.api('GET', `/api/dashboard/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
-    assert.equal(daily.json.days[0].pixelsWasted, rows.pixels);
+    const daily = await ctx.s.api('GET', `/api/dashboard/impact/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
+    assert.equal(daily.json.days[0].pixels, rows.pixels);
     const list = await ctx.s.api('GET', `/api/captures?hallId=${HALL}&start=${DATE}&end=${DATE}&limit=200`);
     const listed = (Array.isArray(list.json) ? list.json : list.json.captures).filter((c) => c.state === 'succeeded');
     assert.equal(listed.reduce((s, c) => s + c.pixelsWasted, 0), rows.pixels);

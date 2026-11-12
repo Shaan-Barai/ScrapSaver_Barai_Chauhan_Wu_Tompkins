@@ -153,7 +153,7 @@ Every error returns the shared envelope `{ "error": { code, message, details?, r
 - `GET /api/images/orphans[?maxAgeSeconds=…]`, `POST /api/images/cleanup-orphans`
   `{ maxAgeSeconds? }` — track and delete uploads never finalized.
 
-### Captures / observations
+### Captures
 - `POST /api/captures` — submit the capture event + geometry after finalize:
   ```json
   { "eventId": "cap_01", "hallId": "hall-main", "serviceId": "svc_hall-main_2026-10-03_lunch",
@@ -173,8 +173,6 @@ Every error returns the shared envelope `{ "error": { code, message, details?, r
   never stored or logged. `503 DISH_MATCH_UNAVAILABLE` without a Gemini key;
   `502` for a provider error or unusable answer (never a guessed verdict).
 - `GET /api/captures/:eventId` — event + all attempts + counted measurements.
-- `GET /api/observations?hallId=…&serviceId=…` — events with their counted
-  (latest succeeded attempt) measurements only; superseded attempts are history.
 
 ### Camera calibration + measurement settings (IT_4)
 - Upload the calibration photo with `associationKind: "calibration"` and
@@ -231,29 +229,12 @@ Every error returns the shared envelope `{ "error": { code, message, details?, r
   `incompatible_geometry`. The overlay legend shows
   `38 g · 1.1 kg CO2e · 18 L water (est.)` after each food's pixels.
 
-### Attendance
-- `GET /api/attendance?serviceId=…` — stored simulated record or `ATTENDANCE_NOT_FOUND`.
-- `PUT /api/attendance` — write path for Agent 6's generator; first write per
-  service wins (never regenerated per request, AGENTS.md 6.3).
-
-### Dashboard summary (§7)
-- `GET /api/dashboard/summary?hallId=…&serviceId=…` → totals (captured/analyzed
-  dishes, observed estimated leftover area in pixels, **area-weighted**
-  `overallWastePercent = 100 * Σremaining / Σbaseline` — never a mean of item
-  percentages), per-item breakdown, **visible exclusion counts** (failed /
-  needs-review / pending captures; unknown-item, missing-baseline,
-  above-baseline, invalid measurements — excluded, counted, never zero waste),
-  and simulated-attendance normalization (`null` + reason when missing/zero).
-
 ### Menu uploads (manager flow, parsed by `scrap-data`)
 - `POST /api/menus/upload` — typed days (`{ hallId, hallTimezone, days: [{ date, breakfast?, lunch?, dinner? }] }`, data/README "Typed/JSON bundle").
-- `POST /api/menus/csv?hallId=…&hallTimezone=…` — `text/csv` body (data/README "CSV").
-- Both return `{ results: [{ action: 'create'|'revise'|'unchanged', menu }] }`; re-uploads with changed items bump `menuVersion`.
+- Returns `{ results: [{ action: 'create'|'revise'|'unchanged', menu }] }`; re-uploads with changed items bump `menuVersion`.
 
 ### Dashboard read models — Pixels wasted (formulas from `@scrap/analytics`)
-- `GET /api/dashboard/daily?hallId=…&start=…&end=…` — per local date: `pixelsWasted` (null = no counted plate, 0 = only clean plates), `capturedDishes`, and `countedDishes`. No grams (BIG-PLAN v2).
 - `GET /api/dashboard/meal?hallId=…&date=…&meal=…` — analytics `PixelServiceSummary` (total, per-item pixels and share, unclassified pixels, counted/empty/excluded plates with reasons), the persisted simulated attendance (generated once on first read), and an `Insight` citing measured pixels (Gemini, or labeled `fallback_rules`; null when no food pixels are attributed). Insights are stored per data version; a stored fallback is retried with Gemini.
-- `GET /api/dashboard/summary` — legacy baseline-percentage summary (`SummaryService`); auxiliary only.
 
 ### Waste impact, plates, recommendation (BIG-PLAN v2: pixels + relative impact points)
 
@@ -295,12 +276,6 @@ unitless and only compare foods with each other. A legacy attempt's stored
   comes from analytics); without a key, or on a provider error, the labeled
   rule-based `source: "fallback"` is returned (retried with Gemini after 60 s).
 
-### Suggestions
-- `GET /api/suggestions?hallId=…` — serves stored `Insight` records. Generation
-  belongs to Agent 6; with none stored this returns
-  `404 SUGGESTIONS_UNAVAILABLE (retryable: true)` — the agreed stub.
-- `POST /api/suggestions` — write path for Agent 6's suggestion service.
-
 ### Misc
 - `GET /api/health` — liveness plus build info: `commit` (git HEAD at start), `startedAt`, `factorsVersion`. `deploy/local.sh status` flags "restart needed" when `commit` differs from the checkout.
 - `GET /api/ready` — `{ ready, checks: { database, objectStorage, samWorker } }`,
@@ -317,10 +292,8 @@ unitless and only compare foods with each other. A legacy attempt's stored
   passes a lazy image reader (temporary read access, per AGENTS.md 4.7). A
   deterministic `MockAnalyzer` (fixtures by eventId) ships for tests/demo;
   swap via `buildBackend({ analyzer })` in `src/wiring.ts`.
-- **Agent 6 (analytics):** `PUT /api/attendance`, `POST /api/suggestions`, and
-  read access to observations; canonical aggregate formulas stay in
-  `analytics/` — the §7 summary here is the backend's contract-mandated
-  aggregate and should be reconciled with Agent 6's module when it lands.
+- **Agent 6 (analytics):** all aggregate and recommendation formulas live in
+  `analytics/`; the backend only gathers records and persists results.
 - **Agent 7 (dashboard):** all GET endpoints; images via
   `/api/images/:objectId/access` (renewable temporary URLs).
 
@@ -405,7 +378,7 @@ default `hall-main`; admin session or ingest token) return the same object. No `
 ## Try an Image (public, never stored)
 
 Visitors can analyse one photo without signing in. Gemini classify + boxes, SAM 2.1 masks and the
-pixel count run via `upload_demo/pipeline.mjs` (imported lazily on first use; the SAM worker must be
+pixel count run via `scripts/try-image-pipeline.mjs` (imported lazily on first use; the SAM worker must be
 reachable). Results live in memory only (last 20 jobs); nothing goes to R2 or SpacetimeDB.
 
 - `GET /api/try-image/status` -> `{ available, reason?, waiting, running, maxWaiting (4), hourlyRemaining }`.
@@ -430,9 +403,6 @@ runner (`test/tryImage.test.ts`).
   never the raw id (`ItemNameResolver`). The impact dashboard validates each
   capture against the menu version its counted attempt froze and pairs it with
   that version's portions snapshot, so a revision never drops old captures.
-- `PUT /api/attendance` and `POST /api/suggestions` are provisional write
-  paths for Agent 6 (first-write-wins attendance); Agent 6 may prefer direct
-  service invocation later.
 - The counted observation for an event is the **latest succeeded** analysis
   attempt; earlier/failed attempts are preserved as history.
 - Orphan ages for `pending_upload` records are tracked in-process; after a
@@ -447,5 +417,3 @@ runner (`test/tryImage.test.ts`).
 
 - Browser-side image upload/display in the dashboard (R2 CORS policy is ready).
 - Reducer-level caller auth if the database is ever exposed beyond the backend.
-- Retire `SummaryService` in favor of the analytics summary once API consumers
-  move to `/api/dashboard/meal`.

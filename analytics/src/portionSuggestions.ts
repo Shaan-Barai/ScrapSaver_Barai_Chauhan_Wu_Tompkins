@@ -1,5 +1,5 @@
 import type { Insight } from './contracts.js';
-import type { TextGateway } from './suggestions.js';
+import type { TextGateway } from './gateway.js';
 import { portionDataVersion, type PortionBenchmark } from './portions.js';
 
 /** Recommendations use the served-portion benchmark, never total waste as a proxy for dislike. */

@@ -132,8 +132,8 @@ test('capture -> masks stored in object storage -> Pixels wasted on the dashboar
   );
   assert.equal(meal.json.insight.metrics.topItemId, 'item_toast');
 
-  const daily = await s.api('GET', `/api/dashboard/daily?hallId=${HALL}&start=2026-10-03&end=2026-10-03`);
-  assert.deepEqual(daily.json.days[0], { date: '2026-10-03', pixelsWasted: 131072, capturedDishes: 1, countedDishes: 1 });
+  const daily = await s.api('GET', `/api/dashboard/impact/daily?hallId=${HALL}&start=2026-10-03&end=2026-10-03`);
+  assert.equal(daily.json.days[0].pixels, 131072);
 });
 
 test('segmentation worker down: capture fails retryably and nothing is counted', async (t) => {

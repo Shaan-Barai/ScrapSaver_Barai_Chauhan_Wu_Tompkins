@@ -10,7 +10,7 @@
  * test/live-<time>/ prefix and a throwaway SpacetimeDB database
  * (scrap-test-live-<time>); both are deleted at the end unless
  * KEEP_LIVE_DATA=1. Detections are scored against ground_truth.csv with the
- * rules of vision/scripts/score-experiment.py; a drop below the last
+ * rules in tests/support/scoring.mjs; a drop below the last
  * experiment (100% recall, 92.3% precision) is reported as a REGRESSION.
  * A report (per-photo results + local copies of the overlays) is written to
  * images/live-test/<time>/ (gitignored).
@@ -195,10 +195,8 @@ describe('live image tests: test2/ through the full pipeline', { skip: skip ?? f
   it('dashboard totals match the scan rows', async () => {
     const rows = await sumScanRows(repo, { hallId: HALL, start: DATE, end: DATE });
     const impact = await s.api('GET', `/api/dashboard/impact?hallId=${HALL}&start=${DATE}&end=${DATE}`);
-    const totals = await s.api('GET', `/api/dashboard/totals?hallId=${HALL}&today=${DATE}`);
-    console.log(`[live] totals: ${rows.pixels} px over ${rows.plates} plates; dashboard ${impact.json.totals.pixels} px; today ${totals.json.today.pixels} px`);
+    console.log(`[live] totals: ${rows.pixels} px over ${rows.plates} plates; dashboard ${impact.json.totals.pixels} px`);
     assert.equal(impact.json.totals.pixels, rows.pixels);
-    assert.equal(totals.json.today.pixels, rows.pixels);
     assert.equal(impact.json.totals.analyzedCaptures, rows.plates);
   });
 

@@ -155,8 +155,8 @@ describe('demo flow e2e (live stack)', { skip: !LIVE_E2E }, () => {
     // Repeated ingestion must not duplicate the dish.
     const second = await api('POST', '/api/captures', capture);
     if (first.body.event.state === 'succeeded') assert.equal(second.body.deduplicated, true);
-    const obs = await api('GET', `/api/observations?hallId=${HALL}&serviceId=${SERVICE}`);
-    assert.equal(obs.body.observations.length, 1);
+    const listed = await api('GET', `/api/captures?hallId=${HALL}&start=${DATE}&end=${DATE}`);
+    assert.equal(listed.body.length, 1);
 
     const access = await api('GET', `/api/images/${auth.body.objectId}/access`);
     assert.equal(access.status, 200);
@@ -178,9 +178,6 @@ describe('demo flow e2e (live stack)', { skip: !LIVE_E2E }, () => {
     } else {
       assert.equal(a.body.insight, null, 'no tip without a counted item');
     }
-
-    const daily = await api('GET', `/api/dashboard/daily?hallId=${HALL}&start=${DATE}&end=${DATE}`);
-    assert.equal(daily.body.days[0].capturedDishes, 1);
   });
 });
 

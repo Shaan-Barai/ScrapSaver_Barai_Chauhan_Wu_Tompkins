@@ -35,18 +35,9 @@ test('submitting the same eventId twice yields one observation, not two', async 
   assert.equal(detail.json.attempts.length, 1, 'no second analysis attempt for a succeeded event');
   assert.equal(detail.json.measurements.length, 1, 'exactly one counted measurement');
 
-  // Exactly one observation exists for the service.
-  const obs = await s.api('GET', `/api/observations?hallId=hall-main&serviceId=${first.json.event.serviceId}`);
-  assert.equal(obs.json.observations.length, 1);
-
-  // And the summary counts the dish once.
-  const summary = await s.api(
-    'GET',
-    `/api/dashboard/summary?hallId=hall-main&serviceId=${first.json.event.serviceId}`,
-  );
-  assert.equal(summary.json.totals.capturedDishes, 1);
-  assert.equal(summary.json.totals.eligibleMeasurements, 1);
-  assert.equal(summary.json.totals.observedRemainingAreaPx, 12000);
+  // The capture list shows the dish once.
+  const listed = await s.api('GET', '/api/captures?hallId=hall-main&start=all&end=2026-12-31');
+  assert.deepEqual(listed.json.map((c: { eventId: string }) => c.eventId), [eventId]);
 });
 
 test('a failed event can be retried: same event, appended attempts, counted once', async (t) => {
@@ -76,12 +67,8 @@ test('a failed event can be retried: same event, appended attempts, counted once
   assert.equal(detail.json.measurements.length, 1, 'only the succeeded attempt is counted');
   assert.equal(detail.json.countedAttemptId, retry.json.attempt.attemptId);
 
-  const summary = await s.api(
-    'GET',
-    `/api/dashboard/summary?hallId=hall-main&serviceId=${retry.json.event.serviceId}`,
-  );
-  assert.equal(summary.json.totals.capturedDishes, 1, 'retries never duplicate the dish');
-  assert.equal(summary.json.totals.observedRemainingAreaPx, 9000);
+  const listed = await s.api('GET', '/api/captures?hallId=hall-main&start=all&end=2026-12-31');
+  assert.equal(listed.json.length, 1, 'retries never duplicate the dish');
 });
 
 test('frozen context: the attempt records the menu version and baseline versions used', async (t) => {
@@ -130,9 +117,8 @@ test('reanalyze: a succeeded plate gets a new counted attempt; a failed re-run k
   assert.equal(detail.json.attempts.length, 3);
   assert.equal(detail.json.countedAttemptId, redo.json.attempt.attemptId);
 
-  const summary = await s.api('GET', `/api/dashboard/summary?hallId=hall-main&serviceId=${first.json.event.serviceId}`);
-  assert.equal(summary.json.totals.capturedDishes, 1, 're-analysis never duplicates the dish');
-  assert.equal(summary.json.totals.observedRemainingAreaPx, 7000);
+  const listed = await s.api('GET', '/api/captures?hallId=hall-main&start=all&end=2026-12-31');
+  assert.equal(listed.json.length, 1, 're-analysis never duplicates the dish');
 
   assert.equal((await s.api('POST', '/api/captures/cap_missing/reanalyze')).status, 404);
 });

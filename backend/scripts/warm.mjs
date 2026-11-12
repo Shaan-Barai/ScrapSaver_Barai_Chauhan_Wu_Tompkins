@@ -50,7 +50,6 @@ const windows = [
 ];
 let pages = 0;
 const pageStart = Date.now();
-await get(`/api/dashboard/totals?${q({ hallId: hall, today })}`);
 await get(`/api/demo/status?${q({ hallId: hall })}`);
 for (const [start, end] of windows) {
   for (const path of ['dashboard/impact', 'dashboard/impact/daily', 'recommendation', 'captures']) {
