@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getCaptureImages, getCaptures, getDailyWaste, getImpactDashboard, getRecommendation } from './liveApi'
+import { getCaptureImages, getCaptures, getImpactDashboard, getRecommendation } from './liveApi'
 
 function respond(status: number, body: unknown) {
   return vi.fn(async (_url: string) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
@@ -28,11 +28,6 @@ describe('liveApi waste-impact endpoints', () => {
     expect(await getCaptures('2026-10-03', '2026-10-03')).toEqual([item])
     vi.stubGlobal('fetch', respond(200, { captures: [item] }))
     expect(await getCaptures('2026-10-03', '2026-10-03')).toEqual([item])
-  })
-
-  it('keeps only pixels on daily points, ignoring any other field', async () => {
-    vi.stubGlobal('fetch', respond(200, { days: [{ date: '2026-10-03', pixelsWasted: 100, grams: 12.5 }] }))
-    expect(await getDailyWaste('2026-10-03', '2026-10-03')).toEqual([{ date: '2026-10-03', pixelsWasted: 100 }])
   })
 
   it('surfaces image-link errors (e.g. missing object) with the server message', async () => {

@@ -97,6 +97,12 @@ function errorFromRow(error: Row | undefined) {
     : undefined;
 }
 
+/** Region ids in natural order (r2 before r10). One shared collator: localeCompare with options builds one per call. */
+const naturalOrder = new Intl.Collator(undefined, { numeric: true });
+function byRegionId(a: Row, b: Row): number {
+  return naturalOrder.compare(String(a.regionId), String(b.regionId));
+}
+
 function quote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -487,7 +493,7 @@ export class SpacetimeRepository implements Repository {
       const { attemptId, eventId: _e, ...rest } = c;
       out.set(attemptId, clean({ ...rest, regions: [] } as unknown as SegmentationResult));
     }
-    regions.sort((a, b) => String(a.regionId).localeCompare(String(b.regionId), undefined, { numeric: true }));
+    regions.sort(byRegionId);
     for (const r of regions) {
       const seg = out.get(r.attemptId);
       if (!seg) continue;
@@ -555,7 +561,7 @@ export class SpacetimeRepository implements Repository {
   private async withRegionIds(rows: Row[], regionQuery: string): Promise<FoodMeasurement[]> {
     const masked = rows.some((r) => r.method === 'mask_pixel_count');
     const regions = masked ? await this.sql(regionQuery) : [];
-    regions.sort((a, b) => String(a.regionId).localeCompare(String(b.regionId), undefined, { numeric: true }));
+    regions.sort(byRegionId);
     return rows.map((row) => {
       const { maskCountJson, ...rest } = row;
       const { physical, ...fields } = rest;

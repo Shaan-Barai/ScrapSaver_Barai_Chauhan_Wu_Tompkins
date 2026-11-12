@@ -249,11 +249,9 @@ Every error returns the shared envelope `{ "error": { code, message, details?, r
 - `POST /api/menus/upload` — typed days (`{ hallId, hallTimezone, days: [{ date, breakfast?, lunch?, dinner? }] }`, data/README "Typed/JSON bundle").
 - `POST /api/menus/csv?hallId=…&hallTimezone=…` — `text/csv` body (data/README "CSV").
 - Both return `{ results: [{ action: 'create'|'revise'|'unchanged', menu }] }`; re-uploads with changed items bump `menuVersion`.
-- `GET /api/menus/days?hallId=…&start=…&end=…` — `{ dates }` that have a menu (Menus calendar).
 
 ### Dashboard read models — Pixels wasted (formulas from `@scrap/analytics`)
-- `GET /api/dashboard/daily?hallId=…&start=…&end=…` — per local date: `pixelsWasted` (null = no counted plate, 0 = only clean plates), `capturedDishes`, `countedDishes`, and `plateWastePercents` (auxiliary). No grams (BIG-PLAN v2).
-- `GET /api/dashboard/cards?hallId=…&today=…` — today / this week (Mon start) / this month `pixelsWasted` and `previousPixelsWasted` for the same-length previous window (null = no data).
+- `GET /api/dashboard/daily?hallId=…&start=…&end=…` — per local date: `pixelsWasted` (null = no counted plate, 0 = only clean plates), `capturedDishes`, and `countedDishes`. No grams (BIG-PLAN v2).
 - `GET /api/dashboard/meal?hallId=…&date=…&meal=…` — analytics `PixelServiceSummary` (total, per-item pixels and share, unclassified pixels, counted/empty/excluded plates with reasons), the persisted simulated attendance (generated once on first read), and an `Insight` citing measured pixels (Gemini, or labeled `fallback_rules`; null when no food pixels are attributed). Insights are stored per data version; a stored fallback is retried with Gemini.
 - `GET /api/dashboard/summary` — legacy baseline-percentage summary (`SummaryService`); auxiliary only.
 

@@ -10,7 +10,7 @@
  * camera work, and the passcode prompt never opens.
  */
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
-import { getSession, login, logout } from '../data/api'
+import { getSession, login } from '../data/api'
 import { AUTH_REQUIRED_EVENT } from '../data/authEvents'
 
 export type AuthStatus = 'checking' | 'signedIn' | 'signedOut'
@@ -24,7 +24,6 @@ export interface AuthValue {
   /** True on the public read-only site: recorded data only, no uploads or edits. */
   readOnly: boolean
   signIn: (passcode: string) => Promise<void>
-  signOut: () => Promise<void>
   /** Open the sign-in dialog, optionally explaining why. */
   openSignIn: (reason?: string) => void
 }
@@ -35,7 +34,6 @@ const SIGNED_OUT: AuthValue = {
   authAvailable: true,
   readOnly: false,
   signIn: async () => {},
-  signOut: async () => {},
   openSignIn: () => {},
 }
 
@@ -112,17 +110,9 @@ export function AuthProvider({
     [closeDialog],
   )
 
-  const signOut = useCallback(async () => {
-    try {
-      await logout()
-    } finally {
-      setStatus('signedOut')
-    }
-  }, [])
-
   const value = useMemo<AuthValue>(
-    () => ({ status, canEdit: true as const, authAvailable, readOnly, signIn, signOut, openSignIn }),
-    [status, authAvailable, readOnly, signIn, signOut, openSignIn],
+    () => ({ status, canEdit: true as const, authAvailable, readOnly, signIn, openSignIn }),
+    [status, authAvailable, readOnly, signIn, openSignIn],
   )
 
   return (

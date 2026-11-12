@@ -301,7 +301,7 @@ test('GET /api/dashboard/daily: pixels per day, no grams; null (never 0) without
   const res = await s.api('GET', `/api/dashboard/daily?hallId=${HALL}&start=2026-10-01&end=2026-10-02`);
   assert.equal(res.status, 200, JSON.stringify(res.json));
   const [before, day] = res.json.days;
-  assert.deepEqual(before, { date: '2026-10-01', pixelsWasted: null, capturedDishes: 0, countedDishes: 0, plateWastePercents: [] });
+  assert.deepEqual(before, { date: '2026-10-01', pixelsWasted: null, capturedDishes: 0, countedDishes: 0 });
   assert.equal(day.pixelsWasted, 20000);
   assert.equal(day.capturedDishes, 3);
   assert.equal(day.countedDishes, 2);

@@ -2,7 +2,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App, { pageForPath } from './App'
-import { MOCK_PASSCODE, getSession } from './data/api'
+import { getSession } from './data/api'
+import { MOCK_PASSCODE } from './data/mockApi'
 import { AUTH_REQUIRED_EVENT } from './data/authEvents'
 
 beforeAll(() => {

@@ -94,7 +94,7 @@ Demo data (sample scans and copies of real plates) is badged **Demo data only**.
 - **Dashboard** (Today / Last 7 days / Last 30 days / All time): cards for Carbon emissions, Water, Food
   wasted (estimates) and Plates scanned; **Carbon emissions by day** chart
   (`GET /api/dashboard/impact/daily`; "Today" charts the last 7 days). No
-  camera button: take photos with `npm run take-photo` in backend/.
+  camera button: take photos with `npm run take-photo` in capture/.
 - **Statistics** (Last 7 / 30 / 90 days / All time): the same cards and chart,
   **Recommendations** (AI or rule-based fallback badge, each bullet with its
   supporting number, Ask again), **Foods to target** (pixels per portion,

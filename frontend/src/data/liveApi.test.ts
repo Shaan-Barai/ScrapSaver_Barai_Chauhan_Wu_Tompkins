@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getDailyWaste, getMealDetail, saveUserMenu } from './liveApi'
+import { getMealDetail, saveUserMenu } from './liveApi'
 
 function respond(status: number, body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
@@ -10,22 +10,6 @@ afterEach(() => {
 })
 
 describe('liveApi', () => {
-  it('passes Pixels wasted through unscaled and keeps no-data days null', async () => {
-    vi.stubGlobal(
-      'fetch',
-      respond(200, {
-        days: [
-          { date: '2026-10-02', pixelsWasted: 21300, capturedDishes: 1, countedDishes: 1 },
-          { date: '2026-10-03', pixelsWasted: null, capturedDishes: 0, countedDishes: 0 },
-        ],
-      }),
-    )
-    expect(await getDailyWaste('2026-10-02', '2026-10-03')).toEqual([
-      { date: '2026-10-02', pixelsWasted: 21300 },
-      { date: '2026-10-03', pixelsWasted: null },
-    ])
-  })
-
   it('turns a missing menu (404) into the friendly empty state', async () => {
     vi.stubGlobal('fetch', respond(404, { error: { code: 'MENU_NOT_FOUND', message: 'No menu', retryable: false } }))
     expect(await getMealDetail('2026-10-03', 'dinner')).toBeNull()

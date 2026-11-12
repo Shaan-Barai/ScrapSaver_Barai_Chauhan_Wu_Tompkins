@@ -68,7 +68,6 @@ test('read-only: reads work, every mutation and AI/camera route is 403 READ_ONLY
     ['GET', '/api/try-image/status'],
     ['GET', '/api/try-image/sample.jpg'],
     ['POST', '/api/try-image'],
-    ['GET', '/api/camera/status'],
   ] as const) {
     const r = await raw(s.baseUrl, method, path, auth, method === 'GET' ? undefined : {});
     assert.equal(r.status, 403, `${method} ${path}`);

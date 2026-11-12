@@ -28,7 +28,7 @@ import {
 import { findNutritionFactor, findWasteFactor, WASTE_FACTORS_VERSION } from 'scrap-data';
 import { badRequest } from '../errors.js';
 import type { Repository } from '../repo/repository.js';
-import type { IngestionService } from './ingestionService.js';
+import { countedOf, type IngestionService } from './ingestionService.js';
 import { ItemNameResolver } from './itemNames.js';
 import type {
   AnalysisAttempt,
@@ -185,7 +185,7 @@ export class ImpactService {
         const latest = attempts.at(-1);
         if (latest) latestAttempts.set(event.eventId, latest);
         if (event.state !== 'succeeded') continue;
-        const counted = await this.ingestion.countedAttempt(event.eventId);
+        const counted = countedOf(attempts);
         if (!counted) continue;
         countedAttempts.set(event.eventId, counted);
         measurements.push(...(await this.repo.listMeasurementsByAttempt(counted.attemptId)));

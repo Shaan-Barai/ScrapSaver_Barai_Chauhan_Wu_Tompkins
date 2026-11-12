@@ -9,42 +9,28 @@
  */
 import { loadSettings } from '../state/settings'
 import { AuthRequiredError, notifyAuthRequired } from './authEvents'
-import { normalizePhoto } from '../lib/normalizePhoto'
 import type {
   AuthSession,
-  CalibrationImages,
-  CameraCalibration,
-  MeasurementSettings,
-  NewCalibration,
-  SignedImage,
   CaptureImages,
   AdminCaptureItem,
   CaptureListItem,
   ImpactDashboard,
   Recommendation,
   DailyImpactPoint,
-  DailyWastePoint,
   DayMenu,
   IsoDate,
   MealDetail,
   MealLabel,
   MenuItemLite,
-  PeriodSummary,
-  SummaryCards,
   PortionService,
   PortionEntry,
   PortionBenchmark,
-  PlateRecord,
-  CameraStatus,
-  TakePhotoResult,
   DemoStatus,
-  WasteTotals,
   TryImageJob,
   TryImageStatus,
   TryImageSubmitted,
 } from './types'
 import { MEALS } from './types'
-import { todayIso } from '../lib/dates'
 
 /** contracts/decisions.md: hall timezone until a hall config says otherwise. */
 const HALL_TIMEZONE = 'America/Detroit'
@@ -120,20 +106,6 @@ export async function getMenu(date: IsoDate): Promise<DayMenu | null> {
   return { date, menuId: body.menus[0].service.menuId, source: 'user', meals }
 }
 
-export async function getMenuDays(start: IsoDate, end: IsoDate): Promise<Record<IsoDate, boolean>> {
-  const { dates } = await call<{ dates: IsoDate[] }>(`/api/menus/days?${q({ hallId: hallId(), start, end })}`)
-  const have = new Set(dates)
-  const out: Record<IsoDate, boolean> = {}
-  for (let d = start; d <= end; d = nextDay(d)) out[d] = have.has(d)
-  return out
-}
-
-function nextDay(d: IsoDate): IsoDate {
-  const t = new Date(`${d}T00:00:00Z`)
-  t.setUTCDate(t.getUTCDate() + 1)
-  return t.toISOString().slice(0, 10)
-}
-
 /** POST /api/menus/upload, parsed and versioned by the backend (data/ helpers). */
 export async function saveUserMenu(date: IsoDate, meals: Record<MealLabel, MenuItemLite[]>): Promise<DayMenu> {
   const day: Record<string, unknown> = { date }
@@ -149,14 +121,6 @@ export async function saveUserMenu(date: IsoDate, meals: Record<MealLabel, MenuI
 // ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
-
-export async function getDailyWaste(start: IsoDate, end: IsoDate): Promise<DailyWastePoint[]> {
-  const { days } = await call<{ days: { date: IsoDate; pixelsWasted: number | null }[] }>(
-    `/api/dashboard/daily?${q({ hallId: hallId(), start, end })}`,
-  )
-  // The chart is pixels only (BIG-PLAN v2); any other per-day fields are ignored.
-  return days.map((d) => ({ date: d.date, pixelsWasted: d.pixelsWasted }))
-}
 
 interface MealResponse {
   portionBenchmark?: PortionBenchmark
@@ -242,60 +206,6 @@ export async function importPortionsCsv(service: PortionService, csv: string): P
 
 export async function getPortionBenchmark(serviceId: string): Promise<PortionBenchmark> {
   return call(`/api/portions-served/benchmark?${q({ hallId: hallId(), serviceId })}`)
-}
-
-interface PeriodResponse {
-  start: IsoDate
-  end: IsoDate
-  pixelsWasted: number
-  previousPixelsWasted: number | null
-  averagePlateWastePercent: number | null
-  platesCounted: number
-}
-
-export async function getSummaryCards(): Promise<SummaryCards> {
-  const body = await call<Record<'today' | 'thisWeek' | 'thisMonth', PeriodResponse>>(
-    `/api/dashboard/cards?${q({ hallId: hallId(), today: todayIso() })}`,
-  )
-  const period = (p: PeriodResponse): PeriodSummary => ({
-    start: p.start,
-    end: p.end,
-    pixelsWasted: p.pixelsWasted,
-    previousPixelsWasted: p.previousPixelsWasted,
-    averagePlateWastePercent: p.averagePlateWastePercent ?? null,
-    platesCounted: p.platesCounted ?? 0,
-  })
-  return { today: period(body.today), thisWeek: period(body.thisWeek), thisMonth: period(body.thisMonth) }
-}
-
-// ---------------------------------------------------------------------------
-// Behind the scenes: scanned plates, their labels, and photo links
-// ---------------------------------------------------------------------------
-
-interface PlatesResponse {
-  plates: (Omit<PlateRecord, 'foods'> & {
-    foods: { itemId: string | null; name: string; leftoverPx: number; percentOfServing: number | null; flags: string[] }[]
-  })[]
-}
-
-export async function getPlates(date: IsoDate, meal: MealLabel): Promise<PlateRecord[]> {
-  const body = await call<PlatesResponse>(`/api/dashboard/plates?${q({ hallId: hallId(), date, meal })}`)
-  return body.plates.map((p) => ({
-    ...p,
-    foods: p.foods.map((f) => ({
-      itemId: f.itemId,
-      name: f.name,
-      pixelsWasted: f.leftoverPx,
-      percentOfServing: f.percentOfServing,
-      flags: f.flags,
-    })),
-  }))
-}
-
-/** Short-lived link to a plate photo; ask again when it expires. */
-export async function getImageUrl(objectId: string): Promise<string> {
-  const body = await call<{ url: string }>(`/api/images/${encodeURIComponent(objectId)}/access`)
-  return body.url
 }
 
 // ---------------------------------------------------------------------------
@@ -400,140 +310,6 @@ export async function login(passcode: string): Promise<AuthSession> {
     if (err instanceof ApiRequestError && err.status === 429) throw new Error('Too many tries. Wait a minute, then try again.')
     throw err
   }
-}
-
-export async function logout(): Promise<void> {
-  await call('/api/auth/logout', { method: 'POST' })
-}
-
-// ---------------------------------------------------------------------------
-// Camera calibration + measurement settings (IT_4 I2, I3, I9)
-// ---------------------------------------------------------------------------
-
-/** Accept `{ key: value }` or the bare value. */
-function unwrap<T>(body: unknown, key: string): T {
-  if (body && typeof body === 'object' && key in (body as Record<string, unknown>)) return (body as Record<string, T>)[key]
-  return body as T
-}
-
-export async function getMeasurementSettings(): Promise<MeasurementSettings> {
-  return unwrap(await call(`/api/settings/measurement?${q({ hallId: hallId() })}`), 'settings')
-}
-
-export async function saveMeasurementSettings(
-  next: Pick<MeasurementSettings, 'activeCalibrationId'>,
-): Promise<MeasurementSettings> {
-  const body = await call('/api/settings/measurement', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hallId: hallId(), ...next }),
-  })
-  return unwrap(body, 'settings')
-}
-
-export async function getCalibrations(): Promise<CameraCalibration[]> {
-  const body = await call(`/api/calibrations?${q({ hallId: hallId() })}`)
-  return unwrap<CameraCalibration[]>(body, 'calibrations') ?? []
-}
-
-export async function getCalibration(calibrationId: string): Promise<CameraCalibration> {
-  return unwrap(await call(`/api/calibrations/${encodeURIComponent(calibrationId)}`), 'calibration')
-}
-
-interface UploadGrant {
-  objectId: string
-  uploadUrl: string
-  uploadHeaders?: Record<string, string>
-}
-
-/** A new calibration id; it is also the upload's association id (backend contract). */
-function newCalibrationId(): string {
-  const rand =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().replace(/-/g, '') : Math.random().toString(36).slice(2)
-  return `cal_${Date.now().toString(36)}${rand.slice(0, 16)}`
-}
-
-/**
- * Normalize the photo like a plate capture (1024 x 1024 centre square), upload
- * it through the backend's storage flow (request upload -> PUT bytes ->
- * finalize) under a new calibration id, then run the calibration.
- */
-export async function createCalibration(input: NewCalibration): Promise<CameraCalibration> {
-  const photo = await normalizePhoto(input.photo)
-  const calibrationId = newCalibrationId()
-  const grant = await call<UploadGrant>('/api/images/uploads', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      associationKind: 'calibration',
-      associationId: calibrationId,
-      mimeType: photo.file.type,
-      sizeBytes: photo.file.size,
-      widthPx: photo.widthPx,
-      heightPx: photo.heightPx,
-    }),
-  })
-  let put: Response
-  try {
-    put = await fetch(grant.uploadUrl, {
-      method: 'PUT',
-      headers: grant.uploadHeaders ?? { 'Content-Type': photo.file.type },
-      body: photo.file,
-    })
-  } catch {
-    throw new Error("The photo didn't upload. Check the connection and try again.")
-  }
-  if (!put.ok) throw new Error("The photo didn't upload. Try again.")
-  await call(`/api/images/${encodeURIComponent(grant.objectId)}/finalize`, { method: 'POST' })
-  const body = await call('/api/calibrations', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      hallId: hallId(),
-      cameraId: input.cameraId,
-      imageObjectId: grant.objectId,
-      knownAreaCm2: input.knownAreaCm2,
-      referenceLabel: input.referenceLabel,
-    }),
-  })
-  return unwrap(body, 'calibration')
-}
-
-type ImagesBody = Partial<Record<'photo' | 'original' | 'image' | 'outline' | 'overlay' | 'reference', SignedImage | null>> & {
-  calibrationId?: string
-}
-
-/** Short-lived links for the calibration photo and the reference outline. */
-export async function getCalibrationImages(calibrationId: string): Promise<CalibrationImages> {
-  const body = await call<ImagesBody>(`/api/calibrations/${encodeURIComponent(calibrationId)}/images`)
-  return {
-    calibrationId,
-    photo: body.photo ?? body.original ?? body.image ?? null,
-    outline: body.outline ?? body.overlay ?? body.reference ?? null,
-  }
-
-}
-
-// ---------------------------------------------------------------------------
-// End-to-end pipeline: headline totals, camera, recommendation regeneration
-// ---------------------------------------------------------------------------
-
-/** Today, this week (Mon-today) and this month (1st-today), in pixels. */
-export async function getWasteTotals(today: IsoDate): Promise<WasteTotals> {
-  return call<WasteTotals>(`/api/dashboard/totals?${q({ hallId: hallId(), today })}`)
-}
-
-export async function getCameraStatus(): Promise<CameraStatus> {
-  return call<CameraStatus>('/api/camera/status')
-}
-
-/** Triggers the Uno Q camera; the plate then goes through the full analysis. */
-export async function takePhoto(): Promise<TakePhotoResult> {
-  return call<TakePhotoResult>('/api/camera/take-photo', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hallId: hallId() }),
-  })
 }
 
 // Try an Image: one-off analysis of an uploaded photo (nothing is added to the dashboard).

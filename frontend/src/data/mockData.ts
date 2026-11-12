@@ -10,8 +10,6 @@
  */
 import { addDays, fromIso } from '../lib/dates'
 import type {
-  CalibrationImages,
-  CameraCalibration,
   CaptureImages,
   CaptureListItem,
   DayMenu,
@@ -785,107 +783,5 @@ export function mockRecommendation(dash: ImpactDashboard, now: Date): Recommenda
     source: 'fallback',
     generatedAt: now.toISOString(),
     inputVersion: `demo:${dash.window.start}:${dash.window.end}:${WASTE_FACTORS_VERSION}`,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// IT_4 mock camera calibrations (Settings -> Camera calibration). A credit
-// card under a Logitech C920s at about 50 cm. Photos are normalized to the
-// same 1024 x 1024 centre square as plate photos. Nominal C920s focal length:
-// (sqrt(1920^2 + 1080^2) / 2) / tan(39 deg) = 1360 px at 1920 x 1080, so
-// 1360 x 1024 / 1080 = 1289.7 px for the 1024 crop (IT_4 I3).
-// ---------------------------------------------------------------------------
-
-export const MOCK_CAMERA_ID = 'uno-q-c920s-1'
-const MOCK_FX = 1289.7
-
-function mockIntrinsics(): CameraCalibration['intrinsics'] {
-  return { cameraModel: 'logitech-c920s', widthPx: 1024, heightPx: 1024, fxPx: MOCK_FX, fyPx: MOCK_FX, cxPx: 512, cyPx: 512, source: 'nominal-fov' }
-}
-
-/** Build a mock calibration: k = known area / reference pixels, height = f x sqrt(k). */
-export function mockCalibration(opts: {
-  calibrationId: string
-  createdAt: string
-  knownAreaCm2: number
-  referenceLabel: string
-  referencePixels: number
-  flags?: CameraCalibration['flags']
-  failed?: string
-}): CameraCalibration {
-  const base = {
-    calibrationId: opts.calibrationId,
-    hallId: MOCK_HALL_ID,
-    cameraId: MOCK_CAMERA_ID,
-    createdAt: opts.createdAt,
-    method: 'reference-area-v1' as const,
-    imageObjectId: `img_${opts.calibrationId}`,
-    widthPx: 1024,
-    heightPx: 1024,
-    knownAreaCm2: opts.knownAreaCm2,
-    referenceLabel: opts.referenceLabel,
-    intrinsics: mockIntrinsics(),
-  }
-  if (opts.failed) {
-    return {
-      ...base,
-      status: 'failed',
-      referencePixels: 0,
-      cm2PerPx: 0,
-      cameraHeightCmGeometric: 0,
-      flags: opts.flags ?? ['reference_not_found'],
-      error: { code: 'REFERENCE_NOT_FOUND', message: opts.failed, retryable: true },
-    }
-  }
-  const k = opts.knownAreaCm2 / opts.referencePixels
-  const heightCm = MOCK_FX * Math.sqrt(k)
-  const flags = [...(opts.flags ?? [])]
-  return {
-    ...base,
-    status: 'succeeded',
-    overlayObjectId: `img_${opts.calibrationId}_outline`,
-    referenceMaskObjectId: `img_${opts.calibrationId}_mask`,
-    referencePixels: opts.referencePixels,
-    cm2PerPx: k,
-    cameraHeightCmGeometric: heightCm,
-    flags,
-  }
-}
-
-function atNine(date: IsoDate): string {
-  const d = fromIso(date)
-  d.setHours(9, 0, 0, 0)
-  return d.toISOString()
-}
-
-/** Calibration history, newest first: active, an older card, an index card at the edge, failed. */
-export function mockCalibrationHistory(today: IsoDate): CameraCalibration[] {
-  return [
-    mockCalibration({ calibrationId: MOCK_ACTIVE_CALIBRATION_ID, createdAt: atNine(addDays(today, -20)), knownAreaCm2: 46.21, referenceLabel: 'credit card', referencePixels: MOCK_CARD_PIXELS }),
-    mockCalibration({ calibrationId: 'cal_demo_2', createdAt: atNine(addDays(today, -26)), knownAreaCm2: 46.21, referenceLabel: 'credit card', referencePixels: 31_570 }),
-    mockCalibration({ calibrationId: 'cal_demo_1', createdAt: atNine(addDays(today, -33)), knownAreaCm2: 93.5, referenceLabel: 'index card', referencePixels: 63_290, flags: ['reference_touches_edge'] }),
-    mockCalibration({ calibrationId: 'cal_demo_0', createdAt: atNine(addDays(today, -34)), knownAreaCm2: 46.21, referenceLabel: 'credit card', referencePixels: 0, failed: 'The card was not found in the photo.' }),
-  ]
-}
-
-/** Mock GET /api/calibrations/:id/images: a card on a tray, and the same photo with the card outlined. */
-export function mockCalibrationImages(cal: CameraCalibration, now: Date): CalibrationImages {
-  const expiresAt = new Date(now.getTime() + 15 * 60_000).toISOString()
-  const wide = (body: string) =>
-    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">${body}</svg>`)}`
-  const tray = '<rect width="640" height="360" fill="#8d8478"/><rect x="40" y="30" width="560" height="300" rx="10" fill="#b9b1a4"/>'
-  const card = '<rect x="262" y="140" width="116" height="73" rx="5" fill="#2f4a6d"/><rect x="276" y="160" width="22" height="16" rx="2" fill="#d7b65c"/>'
-  const photo = { objectId: cal.imageObjectId, url: wide(tray + (cal.status === 'failed' ? '' : card)), expiresAt }
-  if (cal.status !== 'succeeded') return { calibrationId: cal.calibrationId, photo, outline: null }
-  const outline = wide(
-    tray +
-      card +
-      '<rect x="262" y="140" width="116" height="73" rx="5" fill="#17bebb" fill-opacity="0.35" stroke="#ffc914" stroke-width="4"/>' +
-      `<text x="320" y="240" text-anchor="middle" font-family="Times New Roman, serif" font-size="16" fill="#ffffff">${escapeXml(cal.referenceLabel)}: ${cal.knownAreaCm2} cm2</text>`,
-  )
-  return {
-    calibrationId: cal.calibrationId,
-    photo,
-    outline: { objectId: cal.overlayObjectId ?? `${cal.imageObjectId}_outline`, url: outline, expiresAt },
   }
 }

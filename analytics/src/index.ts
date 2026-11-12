@@ -113,7 +113,6 @@ export {
 
 export { summarizePortionBenchmarks, portionDataVersion, validMaskCount, type PortionBenchmark, type PortionBenchmarkItem } from './portions.js';
 export { generatePortionInsight } from './portionSuggestions.js';
-export { plateWastePercent, averagePlateWaste, type PlateWasteAverage } from './plateWaste.js';
 export { readableItemName } from './names.js';
 
 export {

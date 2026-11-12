@@ -1,5 +1,6 @@
 import { beforeEach, expect, it } from 'vitest'
-import { getPortionService, getPortionBenchmark, importPortionsCsv, savePortions, saveUserMenu, setApiLatency } from './api'
+import { getPortionService, getPortionBenchmark, importPortionsCsv, savePortions, saveUserMenu } from './api'
+import { setApiLatency } from './mockApi'
 
 beforeEach(() => { localStorage.clear(); setApiLatency(0) })
 

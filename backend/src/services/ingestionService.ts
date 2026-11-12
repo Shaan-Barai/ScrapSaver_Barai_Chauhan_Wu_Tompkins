@@ -386,10 +386,7 @@ export class IngestionService {
   }
 
   async countedAttempt(eventId: string): Promise<AnalysisAttempt | undefined> {
-    const attempts = await this.repo.listAnalysisAttempts(eventId);
-    const succeeded = attempts.filter((a) => a.status === 'succeeded');
-    succeeded.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.attemptId.localeCompare(b.attemptId));
-    return succeeded.at(-1);
+    return countedOf(await this.repo.listAnalysisAttempts(eventId));
   }
 
   private async resolveBaselines(menu: MenuBundle): Promise<ReferencePortion[]> {
@@ -503,4 +500,11 @@ export class IngestionService {
     }
     return normalized;
   }
+}
+
+/** The counted attempt: the latest succeeded one (ties broken by attemptId). */
+export function countedOf(attempts: readonly AnalysisAttempt[]): AnalysisAttempt | undefined {
+  const succeeded = attempts.filter((a) => a.status === 'succeeded');
+  succeeded.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.attemptId.localeCompare(b.attemptId));
+  return succeeded.at(-1);
 }

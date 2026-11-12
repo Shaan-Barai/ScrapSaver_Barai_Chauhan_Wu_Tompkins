@@ -74,7 +74,7 @@ test('load / clear-data / restore leave real captures stored and restore the def
   assert.deepEqual(empty.ids, []);
   assert.equal(empty.pixels, 0);
   assert.equal(empty.totals.month.captures, 0);
-  assert.equal((await s.api('GET', `/api/dashboard/plates?hallId=${HALL}&date=2026-10-03&meal=lunch`)).json.plates.length, 0);
+  assert.equal((await s.api('GET', `/api/observations?hallId=${HALL}&serviceId=${SERVICE}`)).json.observations.length, 0);
 
   // Nothing real is deleted: the admin list still shows the old plates.
   const admin = await s.repo.listCaptureEvents({ hallId: HALL, includeHidden: true });

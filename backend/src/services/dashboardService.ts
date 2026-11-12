@@ -1,15 +1,13 @@
 /**
- * Dashboard read models for Agent 7's UI (UI.md): daily series, the three
- * summary cards, and per-meal detail with a grounded suggestion — all in
+ * Per-meal read models: the daily series, per-meal detail with a grounded
+ * suggestion, and the portions benchmark — all in
  * **Pixels wasted** (contracts/measurement.md): integer counts of foreground
  * pixels in validated leftover-food masks, one union per capture.
  *
  * All formulas come from Agent 6's analytics package (AGENTS.md 5.6): this
  * service only gathers each capture's counted attempt and measurements, makes
  * sure each service has one persisted simulated attendance value, and stores
- * generated insights. The auxiliary per-plate waste percent (analytics
- * plateWaste) and the "Behind the scenes" plate list ride alongside; they
- * never gate Pixels wasted.
+ * generated insights.
  */
 
 import {
@@ -23,14 +21,11 @@ import {
   type PortionBenchmark,
   generatePixelInsight,
   computePixelDataVersion,
-  plateWastePercent,
-  averagePlateWaste,
-  readableItemName,
 } from '@scrap/analytics';
 import { notFound } from '../errors.js';
 import type { BackendConfig } from '../config.js';
 import type { Repository } from '../repo/repository.js';
-import type { IngestionService } from './ingestionService.js';
+import { countedOf, type IngestionService } from './ingestionService.js';
 import type { AnalysisAttempt, Attendance, CaptureEvent, FoodMeasurement, Insight, MealLabel, MenuBundle } from '../types.js';
 
 const MEALS: MealLabel[] = ['breakfast', 'lunch', 'dinner'];
@@ -41,42 +36,7 @@ export interface DailyPoint {
   pixelsWasted: number | null;
   capturedDishes: number;
   countedDishes: number;
-  /** One entry per scanned plate: its waste percent, or null when unavailable. */
-  plateWastePercents: (number | null)[];
 }
-
-export interface PeriodTotal {
-  start: string;
-  end: string;
-  pixelsWasted: number;
-  /** Same-length window immediately before; null when it has no data. */
-  previousPixelsWasted: number | null;
-  /** Mean per-plate waste percent (clean plates 0%); null without plates. */
-  averagePlateWastePercent: number | null;
-  platesCounted: number;
-  platesWithoutPercent: number;
-}
-
-/** One scanned plate for the "Behind the scenes" view. */
-export interface PlateRecord {
-  eventId: string;
-  capturedAt: string;
-  source: string;
-  state: CaptureEvent['state'];
-  imageObjectId: string;
-  /** null when the plate has no usable percent (see analytics plateWaste). */
-  plateWastePercent: number | null;
-  foods: {
-    itemId: string | null;
-    name: string;
-    leftoverPx: number;
-    fullServingPx: number | null;
-    /** Leftover as a percent of a full serving, capped at 100; null without one. */
-    percentOfServing: number | null;
-    flags: string[];
-  }[];
-}
-
 
 export interface MealDetailResponse {
   serviceId: string;
@@ -102,12 +62,6 @@ function eachDay(start: string, end: string): string[] {
   const out: string[] = [];
   for (let d = start; d <= end; d = addDays(d, 1)) out.push(d);
   return out;
-}
-
-/** Monday-start week, matching the frontend's summary cards. */
-function startOfWeek(date: string): string {
-  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-  return addDays(date, -((day + 6) % 7));
 }
 
 export class DashboardService {
@@ -153,7 +107,7 @@ export class DashboardService {
       const latest = attempts.at(-1);
       if (latest) latestAttempts.set(event.eventId, latest);
       if (event.state !== 'succeeded') continue;
-      const counted = await this.ingestion.countedAttempt(event.eventId);
+      const counted = countedOf(attempts);
       if (!counted) continue;
       countedAttempts.set(event.eventId, counted);
       measurements.push(...(await this.repo.listMeasurementsByAttempt(counted.attemptId)));
@@ -196,9 +150,7 @@ export class DashboardService {
         pixelsWasted: null,
         capturedDishes: 0,
         countedDishes: 0,
-        plateWastePercents: [],
       };
-      for (const capture of obs.captures) point.plateWastePercents.push(plateWastePercent(capture, obs.measurements));
       point.capturedDishes += summary.captureCount;
       point.countedDishes += summary.countedCaptureCount;
       if (summary.countedCaptureCount > 0) {
@@ -207,7 +159,7 @@ export class DashboardService {
       byDate.set(service.serviceDate, point);
     }
     return eachDay(start, end).map(
-      (date) => byDate.get(date) ?? { date, pixelsWasted: null, capturedDishes: 0, countedDishes: 0, plateWastePercents: [] },
+      (date) => byDate.get(date) ?? { date, pixelsWasted: null, capturedDishes: 0, countedDishes: 0 },
     );
   }
 
@@ -219,38 +171,6 @@ export class DashboardService {
     }
     return summarizePortionBenchmarks({ service: menu.service, menuItems: menu.items, captures, measurements,
       portions: await this.repo.listPortionsServed(menu.service.serviceId, menu.service.menuVersion) });
-  }
-
-  async cards(hallId: string, today: string): Promise<Record<'today' | 'thisWeek' | 'thisMonth', PeriodTotal>> {
-    const monthStart = `${today.slice(0, 8)}01`;
-    const windows = { today: today, thisWeek: startOfWeek(today), thisMonth: monthStart };
-    const earliest = addDays(monthStart, -31);
-    const points = new Map((await this.daily(hallId, earliest, today)).map((p) => [p.date, p]));
-    const sum = (start: string, end: string): number | null => {
-      let total: number | null = null;
-      for (const d of eachDay(start, end)) {
-        const v = points.get(d)?.pixelsWasted ?? null;
-        if (v !== null) total = (total ?? 0) + v;
-      }
-      return total;
-    };
-    const period = (start: string): PeriodTotal => {
-      const days = eachDay(start, today).length;
-      const prevEnd = addDays(start, -1);
-      const plates = averagePlateWaste(eachDay(start, today).flatMap((d) => points.get(d)?.plateWastePercents ?? []));
-      return {
-        start,
-        end: today,
-        pixelsWasted: sum(start, today) ?? 0,
-        previousPixelsWasted: sum(addDays(prevEnd, -(days - 1)), prevEnd),
-        ...plates,
-      };
-    };
-    return {
-      today: period(windows.today),
-      thisWeek: period(windows.thisWeek),
-      thisMonth: period(windows.thisMonth),
-    };
   }
 
   async meal(hallId: string, date: string, meal: MealLabel): Promise<MealDetailResponse> {
@@ -274,39 +194,6 @@ export class DashboardService {
       ? await this.portionInsightFor(portionBenchmark)
       : await this.pixelInsightFor(menu, summary);
     return { serviceId: menu.service.serviceId, date, meal, summary, attendance, insight, portionBenchmark };
-  }
-
-  /** Every scanned plate for a meal with its labels, for the "Behind the scenes" view. */
-  async plates(hallId: string, date: string, meal: MealLabel): Promise<{ serviceId: string | null; plates: PlateRecord[] }> {
-    const [menu] = await this.repo.findMenus(hallId, date, meal);
-    if (!menu) return { serviceId: null, plates: [] };
-    const { captures, measurements } = await this.observations(menu);
-    const names = new Map(menu.items.map((i) => [i.itemId, i.displayName]));
-    const plates = captures
-      .slice()
-      .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
-      .map((capture): PlateRecord => ({
-        eventId: capture.eventId,
-        capturedAt: capture.capturedAt,
-        source: capture.source,
-        state: capture.state,
-        imageObjectId: capture.imageObjectId,
-        plateWastePercent: plateWastePercent(capture, measurements),
-        foods: measurements
-          .filter((m) => m.eventId === capture.eventId)
-          .map((m) => {
-            const full = typeof m.baselineAreaPx === 'number' && m.baselineAreaPx > 0 ? m.baselineAreaPx : null;
-            return {
-              itemId: m.itemId,
-              name: m.itemId === null ? 'Unknown food' : names.get(m.itemId) ?? readableItemName(m.itemId),
-              leftoverPx: m.remainingAreaPx,
-              fullServingPx: full,
-              percentOfServing: full === null ? null : Math.round(Math.min(100, (100 * m.remainingAreaPx) / full) * 10) / 10,
-              flags: m.qualityFlags,
-            };
-          }),
-      }));
-    return { serviceId: menu.service.serviceId, plates };
   }
 
   /** Pixels-wasted suggestion, stored and reused for identical data like the portion insight. */

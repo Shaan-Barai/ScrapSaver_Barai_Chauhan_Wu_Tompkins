@@ -2,7 +2,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AdminPage } from './AdminPage'
-import { getCaptures, login, MOCK_PASSCODE } from '../data/api'
+import { getCaptures, login } from '../data/api'
+import { MOCK_PASSCODE } from '../data/mockApi'
 import { addDays, todayIso } from '../lib/dates'
 import { AuthProvider } from '../state/auth'
 

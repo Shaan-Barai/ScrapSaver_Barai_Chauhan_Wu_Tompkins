@@ -7,7 +7,7 @@
  *
  *   cd capture && npm run take-photo                       # meal from the computer's clock
  *   cd capture && npm run take-photo -- --service <id>     # explicit meal service
- *   cd capture && npm run take-photo -- --json             # one JSON line (used by the dashboard button)
+ *   cd capture && npm run take-photo -- --json             # one JSON line (for scripts and tests)
  *
  * Settings come from the repo .env: CAMERA_HOST, CAMERA_USER, CAMERA_SSH_KEY
  * (see .env.example), MEAL_WINDOWS, HALL_ID, API_URL. The scan time is this

@@ -19,7 +19,6 @@ import type { IngestionService } from '../services/ingestionService.js';
 import type { SummaryService } from '../services/summaryService.js';
 import type { DashboardService } from '../services/dashboardService.js';
 import type { DishMatchService } from '../services/dishMatchService.js';
-import type { CameraService } from '../services/cameraService.js';
 import { DEMO_TIME_ZONE, type DemoService } from '../services/demoService.js';
 import type { CaptureService } from '../services/captureService.js';
 import type { PhotoService } from '../services/photoService.js';
@@ -88,8 +87,8 @@ function readOnlyCache(now: () => number) {
   };
 }
 
-/** Routes READ_ONLY=1 refuses even for GET: they run Gemini/SAM or reach the camera. */
-const READ_ONLY_BLOCKED = ['/api/try-image', '/api/camera'];
+/** Routes READ_ONLY=1 refuses even for GET: they run Gemini/SAM. */
+const READ_ONLY_BLOCKED = ['/api/try-image'];
 
 export interface AppDeps {
   config: BackendConfig;
@@ -109,8 +108,6 @@ export interface AppDeps {
   now?: () => number;
   /** Origins the browser talks to directly (presigned object storage), for the CSP. */
   storageOrigins?: string[];
-  /** Dashboard 'Take photo' (optional: tests and offline setups omit it). */
-  camera?: CameraService;
   /** Sample history (DEMO_SEED); optional in tests. */
   demo?: DemoService;
   /** Public 'Try an Image' analyses (in memory only). */
@@ -138,8 +135,8 @@ export function createApp(deps: AppDeps): express.Express {
     next();
   });
 
-  // READ_ONLY=1 (the public offsite site): reads only. Mutations, Try an Image
-  // and the camera are refused before auth, so no token or session unlocks them.
+  // READ_ONLY=1 (the public offsite site): reads only. Mutations and Try an Image
+  // are refused before auth, so no token or session unlocks them.
   if (config.readOnly) {
     app.use((req, res, next) => {
       if (!req.path.startsWith('/api/')) return next();
@@ -300,22 +297,6 @@ export function createApp(deps: AppDeps): express.Express {
         throw badRequest('INVALID_CSV', 'Send the CSV file as text/csv.');
       }
       res.status(201).json({ results: await saveParsedMenus(parseMenuCsv(req.body, { hallId, hallTimezone })) });
-    }),
-  );
-
-  /** Which local dates in [start, end] have at least one meal's menu (Menus calendar). */
-  app.get(
-    '/api/menus/days',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      const start = requireQuery(req, 'start');
-      const end = requireQuery(req, 'end');
-      const dates = new Set(
-        (await repo.listServices(hallId))
-          .map((s) => s.serviceDate)
-          .filter((d) => d >= start && d <= end),
-      );
-      res.json({ dates: [...dates].sort() });
     }),
   );
 
@@ -637,20 +618,6 @@ export function createApp(deps: AppDeps): express.Express {
   app.post('/api/demo/clear-data', wrap(async (req, res) => void res.json(await demoOrThrow().clearData(demoHall(req.body?.hallId)))));
   app.post('/api/demo/restore', wrap(async (req, res) => void res.json(await demoOrThrow().restore(demoHall(req.body?.hallId)))));
 
-  // ---- camera: the dashboard's Take photo button (same path as `npm run take-photo`) ----
-  app.get('/api/camera/status', (_req, res) => {
-    res.json(deps.camera ? deps.camera.status() : { configured: false, busy: false });
-  });
-  // A mutation (authGate: ingest token or admin session) that spends Gemini calls.
-  app.post(
-    '/api/camera/take-photo',
-    geminiCap,
-    wrap(async (req, res) => {
-      if (!deps.camera) throw new HttpError(503, apiError('CAMERA_NOT_CONFIGURED', 'The camera is not available on this server.', false));
-      res.status(201).json(await deps.camera.takePhoto(req.body ?? {}));
-    }),
-  );
-
   // Camera bridge: is this frame the same physical dish? (BRIDGE.md §4.3)
   // Thumbnails are transient — never stored or logged.
   app.post(
@@ -850,28 +817,11 @@ export function createApp(deps: AppDeps): express.Express {
   );
 
   app.get(
-    '/api/dashboard/cards',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      res.json(await dashboard.cards(hallId, requireQuery(req, 'today')));
-    }),
-  );
-
-  app.get(
     '/api/dashboard/meal',
     wrap(async (req, res) => {
       const hallId = requireQuery(req, 'hallId');
       const date = requireQuery(req, 'date');
       res.json(await dashboard.meal(hallId, date, requireQuery(req, 'meal') as MealLabel));
-    }),
-  );
-
-  app.get(
-    '/api/dashboard/plates',
-    wrap(async (req, res) => {
-      const hallId = requireQuery(req, 'hallId');
-      const date = requireQuery(req, 'date');
-      res.json(await dashboard.plates(hallId, date, requireQuery(req, 'meal') as MealLabel));
     }),
   );
 

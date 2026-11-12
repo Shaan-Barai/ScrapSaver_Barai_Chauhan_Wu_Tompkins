@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCaptureImages, getCaptures, getDailyWaste, getImpactDashboard, getRecommendation } from './api'
+import { getCaptureImages, getCaptures, getImpactDashboard, getRecommendation } from './api'
 import { CO2_WEIGHT, MOCK_DINNER_FOODS, WATER_WEIGHT } from './mockData'
 import { addDays, todayIso } from '../lib/dates'
 
@@ -82,18 +82,12 @@ describe('mock captures and images', () => {
   })
 })
 
-describe('mock recommendation and daily pixels', () => {
+describe('mock recommendation', () => {
   it('is a labeled fallback citing pixel numbers', async () => {
     const rec = await getRecommendation(start, today)
     expect(rec.source).toBe('fallback')
     expect(rec.bullets.length).toBeGreaterThan(0)
     expect(rec.bullets[0].metric).toMatch(/pixels wasted per portion/)
     expect(JSON.stringify(rec)).not.toMatch(/\d g\b|kg|CO2e|litre|\$/)
-  })
-
-  it('daily points carry only pixels', async () => {
-    const pts = await getDailyWaste(addDays(today, -6), today)
-    expect(pts).toHaveLength(7)
-    for (const p of pts) expect(Object.keys(p).sort()).toEqual(['date', 'pixelsWasted'])
   })
 })

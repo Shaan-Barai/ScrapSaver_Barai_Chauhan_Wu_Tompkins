@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/data/test/*.test.js",
     "seed": "npm run build && node dist/data/src/seed/generate.js",
     "factors": "node scripts/generate-factors.mjs"

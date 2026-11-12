@@ -20,32 +20,6 @@ async function seedPlates(s: Awaited<ReturnType<typeof startTestServer>>) {
   }
 }
 
-test('cards average plate waste percent, with clean plates as 0% and above-full capped at 100%', async t => {
-  const s = await startTestServer(); t.after(() => s.close()); await seedPlates(s);
-  const cards = await s.api('GET', `/api/dashboard/cards?hallId=${HALL}&today=2026-10-03`);
-  assert.equal(cards.status, 200);
-  // (50% + 0% + 100%) / 3 plates
-  assert.equal(cards.json.today.averagePlateWastePercent, 50);
-  assert.equal(cards.json.today.platesCounted, 3);
-  assert.equal(cards.json.today.platesWithoutPercent, 0);
-});
-
-test('plates endpoint lists every scanned plate with readable labels', async t => {
-  const s = await startTestServer(); t.after(() => s.close()); await seedPlates(s);
-  const res = await s.api('GET', `/api/dashboard/plates?hallId=${HALL}&date=2026-10-03&meal=lunch`);
-  assert.equal(res.status, 200);
-  assert.equal(res.json.serviceId, SERVICE);
-  assert.deepEqual(res.json.plates.map((p: { eventId: string }) => p.eventId), ['plate-half', 'plate-clean', 'plate-over']);
-  const half = res.json.plates[0];
-  assert.equal(half.imageObjectId, 'img-plate-half');
-  assert.equal(half.foods[0].name, MENU.items.find(i => i.itemId === 'item_eggs')!.displayName);
-  assert.equal(half.foods[0].percentOfServing, 50);
-  assert.equal(half.foods[1].name, 'Unknown food');
-  assert.equal(res.json.plates[2].foods[0].percentOfServing, 100);
-  const none = await s.api('GET', `/api/dashboard/plates?hallId=${HALL}&date=2026-10-04&meal=lunch`);
-  assert.deepEqual(none.json, { serviceId: null, plates: [] });
-});
-
 /** Mask-counted plates (union-v1): the pixel summary counts these, unlike legacy area estimates. */
 async function seedMaskPlates(s: Awaited<ReturnType<typeof startTestServer>>) {
   await s.seedMenuAndBaselines();

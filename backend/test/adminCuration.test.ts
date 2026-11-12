@@ -45,8 +45,8 @@ test('hidden plates leave every dashboard read but stay listed for the admin', a
   const gallery = await s.api('GET', `/api/captures?${WINDOW}`);
   assert.deepEqual(gallery.json.map((c: { eventId: string }) => c.eventId), ['plate-b']);
   assert.equal(await pixels(), 450);
-  const meal = await s.api('GET', `/api/dashboard/plates?hallId=${HALL}&date=2026-10-03&meal=lunch`);
-  assert.deepEqual(meal.json.plates.map((p: { eventId: string }) => p.eventId), ['plate-b']);
+  const meal = await s.api('GET', `/api/observations?hallId=${HALL}&serviceId=${SERVICE}`);
+  assert.deepEqual(meal.json.observations.map((o: { event: { eventId: string } }) => o.event.eventId), ['plate-b']);
 
   // Still stored, and the admin list shows both with their flag.
   assert.ok(await s.repo.getCaptureEvent('plate-a'));

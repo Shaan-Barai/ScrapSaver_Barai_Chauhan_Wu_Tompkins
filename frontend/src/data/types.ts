@@ -68,7 +68,7 @@ export interface DayMenu {
   meals: Record<MealLabel, MenuItemLite[]>
 }
 
-/** One point of the main chart (dashboard summary series). */
+/** One point of a per-day chart (lib/grouping.ts). */
 export interface DailyWastePoint {
   date: IsoDate
   /** Pixels wasted that day (counted mask pixels); null = no counted plates. */
@@ -159,47 +159,6 @@ export interface PortionService {
 }
 
 export interface PortionEntry { itemId: string; count: number | null }
-
-export interface PeriodSummary {
-  /** Inclusive local-date window the number covers. */
-  start: IsoDate
-  end: IsoDate
-  pixelsWasted: number
-  /** Same-length window immediately before; null when it has no data. */
-  previousPixelsWasted: number | null
-  /** Mean percent of a full serving left per plate (clean plates 0%); null without plates. */
-  averagePlateWastePercent: number | null
-  platesCounted: number
-}
-
-/** One food label on a scanned plate ("Behind the scenes"). */
-export interface PlateFood {
-  itemId: string | null
-  name: string
-  /** Counted leftover pixels for this food (mask pixels, or a legacy estimate). */
-  pixelsWasted: number
-  /** Leftover as a percent of a full serving (capped at 100); null without a reference serving. */
-  percentOfServing: number | null
-  flags: string[]
-}
-
-/** One scanned plate with its photo reference and labels. */
-export interface PlateRecord {
-  eventId: string
-  capturedAt: string
-  source: string
-  state: 'pending' | 'processing' | 'succeeded' | 'needs_review' | 'failed'
-  imageObjectId: string
-  plateWastePercent: number | null
-  foods: PlateFood[]
-}
-
-/** The three summary cards (Today / This week / This month). */
-export interface SummaryCards {
-  today: PeriodSummary
-  thisWeek: PeriodSummary
-  thisMonth: PeriodSummary
-}
 
 // ---------------------------------------------------------------------------
 // Waste impact (local copy of the contracts/types.ts waste-impact section,
@@ -369,69 +328,6 @@ export interface PhysicalCoverage {
   analyzedCaptures: number
 }
 
-export interface CameraIntrinsics {
-  cameraModel: 'logitech-c920s' | 'other'
-  widthPx: number
-  heightPx: number
-  fxPx: number
-  fyPx: number
-  cxPx: number
-  cyPx: number
-  source: 'nominal-fov' | 'checkerboard' | 'configured'
-}
-
-export type CameraCalibrationFlag =
-  | 'reference_not_found'
-  | 'reference_low_confidence'
-  | 'reference_touches_edge'
-
-/** POST /api/calibrations, GET /api/calibrations[/:id] */
-export interface CameraCalibration {
-  calibrationId: string
-  hallId: string
-  cameraId: string
-  createdAt: string
-  status: 'processing' | 'succeeded' | 'failed'
-  method: 'reference-area-v1'
-  imageObjectId: string
-  overlayObjectId?: string
-  referenceMaskObjectId?: string
-  widthPx: number
-  heightPx: number
-  knownAreaCm2: number
-  referenceLabel: string
-  referencePixels: number
-  cm2PerPx: number
-  intrinsics: CameraIntrinsics
-  /** Camera height above the table, f x sqrt(k) (cm), from the photo. */
-  cameraHeightCmGeometric: number
-  flags: CameraCalibrationFlag[]
-  error?: { code: string; message: string; retryable?: boolean }
-}
-
-/** GET /api/calibrations/:id/images (short-lived links). */
-export interface CalibrationImages {
-  calibrationId: string
-  /** The calibration photo as taken. */
-  photo: SignedImage | null
-  /** The photo with the reference object outlined. */
-  outline: SignedImage | null
-}
-
-/** GET/PUT /api/settings/measurement (per hall). */
-export interface MeasurementSettings {
-  hallId: string
-  activeCalibrationId: string | null
-  updatedAt: string
-}
-
-export interface NewCalibration {
-  cameraId: string
-  knownAreaCm2: number
-  referenceLabel: string
-  photo: File
-}
-
 /** GET /api/auth/me. `authAvailable: false` = the backend has no sign-in (older local backends). */
 export interface AuthSession {
   signedIn: boolean
@@ -439,43 +335,6 @@ export interface AuthSession {
   /** The public read-only site (backend READ_ONLY=1). Absent = false. */
   readOnly?: boolean
   expiresAt?: string
-}
-
-/** GET /api/dashboard/totals: one headline period, in pixels (relative impact points beside it). */
-export interface WasteTotal {
-  start: IsoDate
-  end: IsoDate
-  pixels: number
-  impactPoints: number | null
-  captures: number
-  analyzedCaptures: number
-  /** Generated sample scans counted in this period. */
-  sampleCaptures: number
-  /** Calibrated estimates for the period; null when no plate in it had a calibrated camera (never 0). */
-  estimated?: { grams: number; kgCo2e: number | null; waterLitres: number | null; calibratedCaptures: number } | null
-}
-
-export interface WasteTotals {
-  today: WasteTotal
-  week: WasteTotal
-  month: WasteTotal
-}
-
-/** GET /api/camera/status */
-export interface CameraStatus {
-  configured: boolean
-  host?: string
-  busy: boolean
-}
-
-/** POST /api/camera/take-photo */
-export interface TakePhotoResult {
-  ok: true
-  eventId: string
-  serviceId: string
-  state: string
-  triggeredAt: string
-  receivedAt: string
 }
 
 // "Try an Image": one-off analysis of an uploaded plate photo (not stored on the dashboard).

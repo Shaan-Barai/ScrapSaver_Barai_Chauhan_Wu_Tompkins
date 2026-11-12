@@ -4,6 +4,7 @@ import { render, screen, within } from '@testing-library/react'
 import App from './App'
 import * as api from './data/api'
 import { AUTH_REQUIRED_EVENT } from './data/authEvents'
+import { setMockReadOnly } from './data/mockApi'
 
 const NOTICE = 'This site shows demo data only'
 
@@ -28,7 +29,7 @@ function open(path: string) {
 }
 
 describe('read-only site', () => {
-  beforeEach(() => api.setMockReadOnly(true))
+  beforeEach(() => setMockReadOnly(true))
 
   it('shows the notice above the page', async () => {
     open('/dashboard')

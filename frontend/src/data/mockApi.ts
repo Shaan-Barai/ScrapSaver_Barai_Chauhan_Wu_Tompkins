@@ -4,54 +4,33 @@
  * Every function answers from src/data/mockData.ts (plus the manager's own
  * menus kept in localStorage), with the same signatures as liveApi.ts.
  */
-import { ALL_TIME_START, addDays, eachDay, startOfMonth, startOfWeek, todayIso } from '../lib/dates'
+import { ALL_TIME_START, addDays, eachDay, todayIso } from '../lib/dates'
 import { AuthRequiredError, notifyAuthRequired } from './authEvents'
 import {
-  MOCK_ACTIVE_CALIBRATION_ID,
-  MOCK_CARD_PIXELS,
-  MOCK_FUTURE_MENU_DAYS,
-  MOCK_HALL_ID,
-  mockCalibration,
-  mockCalibrationHistory,
-  mockCalibrationImages,
   mockCaptureImages,
   mockCaptures,
   mockImpactDashboard,
   mockMealDetail,
   mockMenuFor,
   mockRecommendation,
-  rng,
 } from './mockData'
 import type {
   AuthSession,
-  CalibrationImages,
-  CameraCalibration,
-  MeasurementSettings,
-  NewCalibration,
-
-  CameraStatus,
-  TakePhotoResult,
   DemoStatus,
-  WasteTotal,
-  WasteTotals,
   CaptureImages,
   AdminCaptureItem,
   CaptureListItem,
   ImpactDashboard,
   Recommendation,
   DailyImpactPoint,
-  DailyWastePoint,
   DayMenu,
   IsoDate,
   MealDetail,
   MealLabel,
   MenuItemLite,
-  PeriodSummary,
-  SummaryCards,
   PortionService,
   PortionEntry,
   PortionBenchmark,
-  PlateRecord,
   TryImageJob,
   TryImageStatus,
   TryImageSubmitted,
@@ -102,15 +81,6 @@ export async function getMenu(date: IsoDate): Promise<DayMenu | null> {
   return menuFor(date, todayIso())
 }
 
-/** Which days in [start, end] have a menu, feeds the Menus calendar. */
-export async function getMenuDays(start: IsoDate, end: IsoDate): Promise<Record<IsoDate, boolean>> {
-  await wait()
-  const today = todayIso()
-  const out: Record<IsoDate, boolean> = {}
-  for (const d of eachDay(start, end)) out[d] = menuFor(d, today) !== null
-  return out
-}
-
 /** Save (or replace) the manager's menu for one day. */
 export async function saveUserMenu(date: IsoDate, meals: Record<MealLabel, MenuItemLite[]>): Promise<DayMenu> {
   await wait()
@@ -122,25 +92,6 @@ export async function saveUserMenu(date: IsoDate, meals: Record<MealLabel, MenuI
   for (const meal of MEALS) delete counts[`mock|${date}|${meal}`]
   localStorage.setItem(PORTIONS_KEY, JSON.stringify(counts))
   return menu
-}
-
-/** Daily waste series for the chart; null pixelsWasted = no data that day. */
-export async function getDailyWaste(start: IsoDate, end: IsoDate): Promise<DailyWastePoint[]> {
-  await wait()
-  const today = todayIso()
-  return eachDay(start, end).map((date) => ({ date, pixelsWasted: dailyTotal(date, today) }))
-}
-
-function dailyTotal(date: IsoDate, today: IsoDate): number | null {
-  if (date > today) return null
-  const menu = menuFor(date, today)
-  if (!menu) return null
-  let sum = 0
-  for (const meal of MEALS) {
-    const d = mockMealDetail(date, meal, menu, today)
-    if (d) sum += d.pixelsWasted
-  }
-  return sum
 }
 
 /** Right-panel detail for one meal service; null = no menu / no data. */
@@ -212,60 +163,6 @@ export async function getPortionBenchmark(serviceId: string): Promise<PortionBen
     label: 'Pixels wasted per portion', unit: 'pixels/portion',
     coverageNote: 'Demo data. Validated masks are not connected; no per-portion values are available.',
   }
-}
-
-/** The three summary cards. Each compares to the same-length window before it. */
-export async function getSummaryCards(): Promise<SummaryCards> {
-  await wait()
-  const today = todayIso()
-  return {
-    today: period(today, today, today),
-    thisWeek: period(startOfWeek(today), today, today),
-    thisMonth: period(startOfMonth(today), today, today),
-  }
-}
-
-function period(start: IsoDate, end: IsoDate, today: IsoDate): PeriodSummary {
-  const days = eachDay(start, end)
-  const prevEnd = addDays(start, -1)
-  const prevStart = addDays(prevEnd, -(days.length - 1))
-  const sum = (ds: IsoDate[]) => {
-    let total = 0
-    let any = false
-    for (const d of ds) {
-      const v = dailyTotal(d, today)
-      if (v !== null) {
-        total += v
-        any = true
-      }
-    }
-    return any ? total : null
-  }
-  // Demo plate percent: a steady 15 to 40% per day, averaged over days with data.
-  const percents = days.filter((d) => dailyTotal(d, today) !== null).map((d) => 15 + rng(`plate:${d}`)() * 25)
-  return {
-    start,
-    end,
-    pixelsWasted: sum(days) ?? 0,
-    previousPixelsWasted: sum(eachDay(prevStart, prevEnd)),
-    averagePlateWastePercent: percents.length ? Math.round((percents.reduce((a, b) => a + b, 0) / percents.length) * 10) / 10 : null,
-    platesCounted: percents.length,
-  }
-}
-
-/** Latest selectable menu date (mock menus run a few days ahead). */
-export function latestMenuDate(): IsoDate {
-  return addDays(todayIso(), MOCK_FUTURE_MENU_DAYS)
-}
-
-/** Demo mode has no photos: Behind the scenes shows its empty state. */
-export async function getPlates(_date: IsoDate, _meal: MealLabel): Promise<PlateRecord[]> {
-  await wait()
-  return []
-}
-
-export async function getImageUrl(_objectId: string): Promise<string> {
-  throw new Error('Demo mode has no photos.')
 }
 
 // ---------------------------------------------------------------------------
@@ -434,132 +331,6 @@ export async function login(passcode: string): Promise<AuthSession> {
   return { signedIn: true, authAvailable: true }
 }
 
-export async function logout(): Promise<void> {
-  await wait()
-  localStorage.removeItem(SESSION_KEY)
-}
-
-// ---------------------------------------------------------------------------
-// Camera calibration + measurement settings (IT_4), kept in this browser.
-// ---------------------------------------------------------------------------
-
-const CALIBRATION_KEY = 'scrap.mock.calibration.v2'
-
-interface CalibrationStore {
-  settings: MeasurementSettings
-  calibrations: CameraCalibration[]
-}
-
-function readCalibrationStore(): CalibrationStore {
-  try {
-    const raw = localStorage.getItem(CALIBRATION_KEY)
-    if (raw) return JSON.parse(raw) as CalibrationStore
-  } catch {
-    // fall through to the seed
-  }
-  const today = todayIso()
-  return {
-    settings: {
-      hallId: MOCK_HALL_ID,
-      activeCalibrationId: MOCK_ACTIVE_CALIBRATION_ID,
-      updatedAt: new Date(`${addDays(today, -20)}T13:00:00Z`).toISOString(),
-    },
-    calibrations: mockCalibrationHistory(today),
-  }
-}
-
-function writeCalibrationStore(store: CalibrationStore): void {
-  localStorage.setItem(CALIBRATION_KEY, JSON.stringify(store))
-}
-
-export async function getMeasurementSettings(): Promise<MeasurementSettings> {
-  await wait()
-  return readCalibrationStore().settings
-}
-
-export async function saveMeasurementSettings(
-  next: Pick<MeasurementSettings, 'activeCalibrationId'>,
-): Promise<MeasurementSettings> {
-  await wait()
-  requireSession()
-  const store = readCalibrationStore()
-  if (next.activeCalibrationId !== null) {
-    const cal = store.calibrations.find((c) => c.calibrationId === next.activeCalibrationId)
-    if (!cal || cal.status !== 'succeeded') throw new Error('Only a finished calibration can be used.')
-  }
-  store.settings = { hallId: store.settings.hallId, activeCalibrationId: next.activeCalibrationId, updatedAt: new Date().toISOString() }
-  writeCalibrationStore(store)
-  return store.settings
-}
-
-export async function getCalibrations(): Promise<CameraCalibration[]> {
-  await wait()
-  return readCalibrationStore().calibrations
-}
-
-export async function getCalibration(calibrationId: string): Promise<CameraCalibration> {
-  await wait()
-  const cal = readCalibrationStore().calibrations.find((c) => c.calibrationId === calibrationId)
-  if (!cal) throw new Error('This calibration no longer exists.')
-  return cal
-}
-
-/**
- * Demo calibration: the "photo" is not analyzed. The card always covers
- * MOCK_CARD_PIXELS (30,730 of the 1024 x 1024 photo), scaled by the known area.
- */
-export async function createCalibration(input: NewCalibration): Promise<CameraCalibration> {
-  await wait()
-  requireSession()
-  if (!(Number.isFinite(input.knownAreaCm2) && input.knownAreaCm2 > 0)) throw new Error('Enter the reference size in cm², more than 0.')
-  if (!input.photo.type.startsWith('image/')) throw new Error('Choose a photo (JPEG, PNG or WebP).')
-  const store = readCalibrationStore()
-  const n = store.calibrations.length
-  const cal = mockCalibration({
-    calibrationId: `cal_demo_new_${n}_${Date.now().toString(36)}`,
-    createdAt: new Date().toISOString(),
-    knownAreaCm2: input.knownAreaCm2,
-    referenceLabel: input.referenceLabel.trim() || 'reference object',
-    referencePixels: Math.round(MOCK_CARD_PIXELS * (input.knownAreaCm2 / 46.21)),
-  })
-  store.calibrations = [{ ...cal, cameraId: input.cameraId }, ...store.calibrations]
-  writeCalibrationStore(store)
-  return store.calibrations[0]
-}
-
-export async function getCalibrationImages(calibrationId: string): Promise<CalibrationImages> {
-  const cal = await getCalibration(calibrationId)
-  return mockCalibrationImages(cal, new Date())
-
-}
-
-// ---------------------------------------------------------------------------
-// End-to-end pipeline (mock): headline totals, camera, regeneration
-// ---------------------------------------------------------------------------
-
-function mockTotal(start: IsoDate, end: IsoDate): WasteTotal {
-  const d = mockImpactDashboard(start, end, todayIso())
-  return {
-    start,
-    end,
-    pixels: d.totals.pixels,
-    impactPoints: d.totals.impactPoints,
-    captures: d.totals.captures,
-    analyzedCaptures: d.totals.analyzedCaptures,
-    sampleCaptures: 0,
-  }
-}
-
-export async function getWasteTotals(today: IsoDate): Promise<WasteTotals> {
-  await wait()
-  return { today: mockTotal(today, today), week: mockTotal(startOfWeek(today), today), month: mockTotal(startOfMonth(today), today) }
-}
-
-export async function getCameraStatus(): Promise<CameraStatus> {
-  await wait()
-  return { configured: false, busy: false }
-}
-
 // Demo data controls: the mock keeps its mode in memory.
 let demoStatus: DemoStatus = { hallId: 'hall-main', mode: 'default', sampleLoaded: false, sampleCaptures: 0, clearedAt: null }
 export async function getDemoStatus(): Promise<DemoStatus> {
@@ -580,11 +351,6 @@ export async function restoreDemoData(): Promise<DemoStatus> {
   await wait()
   demoStatus = { ...demoStatus, mode: 'default', clearedAt: null }
   return { ...demoStatus }
-}
-
-export async function takePhoto(): Promise<TakePhotoResult> {
-  await wait()
-  throw new Error('Demo mode has no camera. Run with the backend to take photos.')
 }
 
 export async function regenerateRecommendation(start: IsoDate, end: IsoDate): Promise<Recommendation> {

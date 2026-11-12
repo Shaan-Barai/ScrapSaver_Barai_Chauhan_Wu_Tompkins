@@ -117,7 +117,6 @@ photos and logs to `images/demo-runs/` (gitignored). **Adding a feature? Add a d
 | `deploy/` | — | Local production stack, smoke test, Cloudflare Tunnel; `deploy/server/` for the read-only offsite server |
 | `experiments/` | — | One-off segmentation/menu experiment outputs and `test_sam.py` (not used at runtime) |
 | `test2/`, `demo_pictures/`, `upload_demo/` | — | Demo plate photos, pipeline pictures, upload demo site (used by `demo.py`) |
-| `archive/preview-app/` | — | Earlier standalone preview app, superseded by `frontend/` + `backend/` (not used at runtime) |
 
 Root files: `demo.py` (one-command demo) and `test-all.sh` (every test).
 `images/` holds local, gitignored photos and demo-run logs.
@@ -190,7 +189,7 @@ cd tests && npm run test:camera -- auto   # real Uno Q: stages 1-6 (then: plate,
 cd tests && npm run test:smoke         # dashboard in Chrome (Playwright)
 ```
 
-Camera and the dashboard button: `cd capture && npm run take-photo` (settings in `.env`: CAMERA_HOST, CAMERA_USER, CAMERA_SSH_KEY).
+Take one camera photo: `cd capture && npm run take-photo` (settings in `.env`: CAMERA_HOST, CAMERA_USER, CAMERA_SSH_KEY).
 Sample history: `cd backend && npm run demo:seed` (DEMO_SEED=1) / `npm run demo:clear`.
 Demo copies (real plates repeated over the last 8 weeks, badged "Demo data only"): `cd backend && SCRAP_INGEST_TOKEN=… npm run demo:spread`; `npm run demo:clear` removes them too.
 
@@ -219,7 +218,6 @@ python3 capture/scripts/live_camera_test.py --target arduino@<board-ip> --identi
 | `GET /api/dashboard/totals?today&hallId` | Pixels wasted today, this week (Mon-today), this month (1st-today) |
 | `POST /api/captures/:eventId/reanalyze` | re-runs Gemini + SAM on a stored real plate (same eventId, the service's current menu); counted only if it succeeds. Script: `backend/scripts/reanalyze.mjs` |
 | `POST /api/recommendation/regenerate` | asks Gemini again for `{start,end,hallId}`; every recommendation is saved (insight table) with its inputs |
-| `GET /api/camera/status`, `POST /api/camera/take-photo` | `npm run take-photo` (the dashboard has no camera button) |
 | `POST /api/demo/seed`, `POST /api/demo/clear` | labeled sample history (DEMO_SEED=1) and removing it |
 
 See [`docs/`](docs/) for the [demo walkthrough](docs/demo-walkthrough.md),

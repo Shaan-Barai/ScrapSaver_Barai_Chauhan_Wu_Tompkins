@@ -1,14 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import {
-  getDailyWaste,
-  getMealDetail,
-  getMenu,
-  getMenuDays,
-  getSummaryCards,
-  saveUserMenu,
-  setApiLatency,
-} from './api'
-import { addDays, eachDay, todayIso } from '../lib/dates'
+import { getMealDetail, getMenu, saveUserMenu } from './api'
+import { setApiLatency } from './mockApi'
+import { addDays, todayIso } from '../lib/dates'
 
 beforeEach(() => {
   localStorage.clear()
@@ -17,25 +10,6 @@ beforeEach(() => {
 
 const today = todayIso()
 const yesterday = addDays(today, -1)
-
-describe('getDailyWaste', () => {
-  it('returns one point per day of the range, in order', async () => {
-    const start = addDays(today, -13)
-    const points = await getDailyWaste(start, today)
-    expect(points.map((p) => p.date)).toEqual(eachDay(start, today))
-  })
-
-  it('is deterministic (same mock values on every call)', async () => {
-    const a = await getDailyWaste(addDays(today, -6), today)
-    const b = await getDailyWaste(addDays(today, -6), today)
-    expect(a).toEqual(b)
-  })
-
-  it('has no data for future days', async () => {
-    const points = await getDailyWaste(addDays(today, 1), addDays(today, 3))
-    expect(points.every((p) => p.pixelsWasted === null)).toBe(true)
-  })
-})
 
 describe('getMealDetail', () => {
   async function someDayWithData() {
@@ -59,8 +33,11 @@ describe('getMealDetail', () => {
 
   it('returns null when the day has no menu', async () => {
     // find a mock missing-menu day in the past year
-    const days = await getMenuDays(addDays(today, -200), yesterday)
-    const missing = Object.entries(days).find(([, has]) => !has)?.[0]
+    let missing: string | undefined
+    for (let i = 1; i <= 200 && !missing; i++) {
+      const date = addDays(yesterday, -i)
+      if ((await getMenu(date)) === null) missing = date
+    }
     expect(missing).toBeDefined()
     expect(await getMealDetail(missing!, 'dinner')).toBeNull()
   })
@@ -78,22 +55,5 @@ describe('user menus (localStorage overlay, swapped for POST /api/menus later)',
     const menu = await getMenu(date)
     expect(menu?.source).toBe('user')
     expect(menu?.meals.breakfast[0].displayName).toBe('Bagels')
-    const days = await getMenuDays(date, date)
-    expect(days[date]).toBe(true)
-  })
-})
-
-describe('getSummaryCards', () => {
-  it('covers the expected windows and compares to the prior period', async () => {
-    const cards = await getSummaryCards()
-    expect(cards.today.start).toBe(today)
-    expect(cards.today.end).toBe(today)
-    expect(cards.thisMonth.start).toBe(today.slice(0, 8) + '01')
-    expect(cards.thisWeek.end).toBe(today)
-    // previous window exists in 400 days of mock history
-    expect(cards.thisWeek.previousPixelsWasted).not.toBeNull()
-    expect(cards.thisMonth.pixelsWasted).toBeGreaterThan(0)
-    expect(cards.thisMonth.averagePlateWastePercent).toBeGreaterThanOrEqual(0)
-    expect(cards.thisMonth.averagePlateWastePercent).toBeLessThanOrEqual(100)
   })
 })

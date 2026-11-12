@@ -646,3 +646,25 @@ only (`frontend/src/components/DateRangePicker.tsx`); no API change.
   2 plates were analyzed" next to 424 plates. Gemini answered `GEMINI_BILLING` on 2026-11-01, so no
   new AI text could be generated.
 
+
+## 2026-11-08: simplification pass (no user-visible feature removed)
+
+- **Removed unused API surface.** Endpoints whose only caller was frontend code already
+  unreachable from the UI: `GET /api/menus/days` (old Menus calendar), `GET /api/dashboard/cards`
+  and `GET /api/dashboard/plates` (pre-BIG-PLAN dashboard), `GET /api/camera/status` and
+  `POST /api/camera/take-photo` (the removed Take photo button; `cd capture && npm run take-photo`
+  is unchanged). With them went `CameraService`, the auxiliary per-plate waste percent
+  (`analytics` `plateWastePercent` / `averagePlateWaste`, and `plateWastePercents` on
+  `/api/dashboard/daily`), and the frontend's unused calls (`getMenuDays`, `getDailyWaste`,
+  `getSummaryCards`, `getPlates`, `getImageUrl`, `getWasteTotals`, camera, calibration and
+  measurement-settings calls, `logout`/`signOut`). Calibration, measurement-settings and totals
+  endpoints stay: `capture/`, `demo.py`, `warm.mjs` and the e2e tests use them.
+- **Faster dashboard reads.** `SpacetimeRepository` sorts region ids with one shared
+  `Intl.Collator` (`localeCompare` with options built a collator per comparison), and the impact
+  and meal read models pick the counted attempt from the attempts they already loaded
+  (`countedOf`) instead of decoding them twice. All-time `/api/dashboard/impact`, `/api/captures`
+  and `/api/dashboard/impact/daily` went from ~300 ms to ~90 ms of backend work each.
+- **Clean builds.** `data`, `analytics`, `capture` and `backend` delete `dist/` before compiling
+  (as `vision` already did), so a deleted source can't survive as a stale `.js` that tests still
+  run. The backend no longer builds `capture/` (only the removed camera endpoint needed it).
+- **`archive/preview-app/` removed** (superseded, not used at runtime; see the 2026-10-04 entry).
